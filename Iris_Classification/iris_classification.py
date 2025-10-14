@@ -93,7 +93,13 @@ def plots_multi():
     g.map_diag(sns.kdeplot, lw=3, legend=False)
     matplotlib.pyplot.show()
 
-    
+def correlation():
+    #create correlation heatmap
+    cors = iris[['SepalLengthCm','SepalWidthCm','PetalLengthCm','PetalWidthCm']].corr()
+    matplotlib.pyplot.figure(figsize=(10,4))
+    sns.heatmap(cors, annot=True, cmap='Reds_r')
+    matplotlib.pyplot.title('Correlation Matrix')
+    matplotlib.pyplot.show()
     
 if __name__ == '__main__':
     descriptive_stats()
@@ -102,3 +108,6 @@ if __name__ == '__main__':
     plots_scatter()
     
     plots_multi()
+    
+    correlation()
+    print ('---------------------')
