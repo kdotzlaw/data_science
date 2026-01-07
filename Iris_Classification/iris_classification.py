@@ -232,6 +232,20 @@ def hp(model, xTrain, yTrain):
         grid_search.fit(xTrain, yTrain)
         params = grid_search.best_params_
         
+    elif(model=="Random Forest"):
+        grid={'n_estimators':[10,50,100,200],
+              'max_depth':[8,9,10,11,12,13,14,15],
+              'min_samples_split':[2,3,4,5] }  
+        #initialize model
+        rf = RandomForestClassifier(random_state=0)
+        # repeated stratified kfold cross validation
+        rskf = RepeatedStratifiedKFold(n_splits=3,n_repeats=3,random_state=0)
+        #initialize randomsearchcv
+        randomSearch = RandomizedSearchCV(rf,grid,cv=rskf,n_iter=10,n_jobs=-1)
+        #fit randomSearch to training data
+        randomSearch.fit(xTrain,yTrain)
+        params = randomSearch.best_params_
+    
     return params
     
 if __name__ == '__main__':
@@ -308,4 +322,19 @@ if __name__ == '__main__':
     print(score)
     
     '''-------Random Forest-----------'''
-    
+    print("\n Random Forest")
+    rf = RandomForestClassifier(random_state=0)
+    rfScore = model_eval(rf,xTrain,yTrain,xTest,yTest)
+    #update model scores with rf score
+    score["Random Forest"] = rfScore
+    params = hp("Random Forest",xTrain, yTrain)
+
+    #initialize model with optimal parameters
+    rf=RandomForestClassifier(n_estimators=params['n_estimators'],
+                              min_samples_leaf=params['min_samples_split'],
+                              max_depth=params['max_depth'],
+                              random_state=0)
+    rfScore=model_eval(rf,xTrain,yTrain,xTest,yTest)
+    #update model score
+    score["Random Forest tuned"] = rfScore
+    print(score)
