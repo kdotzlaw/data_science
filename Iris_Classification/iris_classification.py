@@ -138,7 +138,7 @@ PROCESS:
 
 
 '''
-def model_eval(model, trainX, trainY, testX, testY):
+def model_eval(model, trainX, trainY, xTest, yTest):
     # fit model to training data
     model.fit(trainX, trainY)
     
@@ -245,7 +245,36 @@ def hp(model, xTrain, yTrain):
         #fit randomSearch to training data
         randomSearch.fit(xTrain,yTrain)
         params = randomSearch.best_params_
-    
+
+    elif(model=="SVM"):
+        #hp grid
+        grid={'C':np.arange(0.1,10,0.1),
+              'kernel':['linear','poly','rbf','sigmoid'],
+              'degree':np.arange(2,6,1)
+        }
+        #init model
+        svm = SVC(random_state=0,probability=True)
+        #repeated stratified kfold 
+        rskf = RepeatedStratifiedKFold(n_splits=3,n_repeats=3,random_state=0)
+        #initialize randomsearchcv with kfold cross validation
+        randomSearch = RandomizedSearchCV(svm,grid,n_iter=10,cv=rskf,n_jobs=-1)
+        #fit to training data
+        randomSearch.fit(xTrain,yTrain)
+        params = randomSearch.best_params_
+
+    elif(model=="Naive Bayes"):
+        #hp grid
+        grid={'var_smoothing':np.logspace(0,-9,num=100)}
+        #init model
+        nb = GaussianNB()
+        #repeated stratified kfold 
+        rskf = RepeatedStratifiedKFold(n_splits=4,n_repeats=4,random_state=0)
+        #init gridsearchcv for cross validation
+        gridSearch = GridSearchCV(nb,grid,cv=rskf,n_jobs=-1)
+        #fit to training data
+        gridSearch.fit(xTrain,yTrain)
+        params = gridSearch.best_params_
+
     return params
     
 if __name__ == '__main__':
@@ -300,6 +329,7 @@ if __name__ == '__main__':
     score["Logistic Regression tuned"] = lrScore
     print(score)
     
+    
     '''-------Decision Tree-----------'''
     print("\nDecision Tree")
     dt = DecisionTreeClassifier(random_state=20)
@@ -327,6 +357,7 @@ if __name__ == '__main__':
     rfScore = model_eval(rf,xTrain,yTrain,xTest,yTest)
     #update model scores with rf score
     score["Random Forest"] = rfScore
+    
     params = hp("Random Forest",xTrain, yTrain)
 
     #initialize model with optimal parameters
@@ -338,3 +369,39 @@ if __name__ == '__main__':
     #update model score
     score["Random Forest tuned"] = rfScore
     print(score)
+
+    '''----------Support Vector Machine (SVM)----------'''
+    print("Support Vector Machine")
+    svm = SVC(kernel='linear',random_state=0,probability=True)
+    svmScore = model_eval(svm, xTrain,yTrain,xTest,yTest)
+    #update score
+    score['SVM'] = svmScore
+    
+    params=hp("SVM",xTrain, yTrain)
+
+    #initialize model with optimal parameters
+    svm = SVC(C=params['C'],
+              kernel=params['kernel'],
+              degree=params['degree'],
+              random_state=0,
+              probability=True)
+    svmScore = model_eval(svm, xTrain,yTrain,xTest,yTest)
+    score['SVM tuned']=svmScore
+    print(score)
+
+    '''-----Naive Bayes----'''
+    print("Naive Bayes")
+    nb = GaussianNB()
+    #evaluate model
+    nbScore = model_eval(nb,xTrain,yTrain,xTest,yTest)
+    score['Naive Bayes']=nbScore
+    params = hp("Naive Bayes",xTrain,yTrain)
+    
+    #initalize model with optimal parameters
+    nb=GaussianNB(var_smoothing=params['var_smoothing'])
+    nbScore = model_eval(nb,xTrain,yTrain,xTest,yTest)
+    #update score
+    score["Naive Bayes tuned"] = nbScore
+    print(score)
+
+    '''----Neural Network----'''
