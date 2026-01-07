@@ -474,3 +474,31 @@ if __name__ == '__main__':
     for metric, bestModel in bestModels.items():
         print(f"{metric}: {bestModel} - {models[metric+' Test'][bestModel].round(4)}")
 
+    #choose recall as best metric to max true positives and min fase negatives
+    scoreSample = score.transpose()
+    removeOverfittingModels = scoreSample[scoreSample['Recall Train']>=0.98].index
+    nScore = scoreSample.drop(removeOverfittingModels)
+    nScore = nScore.drop(['Precision Train','Precision Test','Accuracy Train','Accuracy Test','F1 Train','F1 Test'],axis=1)
+    nScore.index.name='Classification Model'
+    print(nScore.to_markdown())
+
+    bModel = nScore.index[0]
+    print(bModel)
+    #predict category labels using tuned model
+    categoryRF = ['Iris-Setosa','Iris-Versicolor','Iris-Virginica']
+    #create an example data point outside data set
+    dp = np.array([[5.1,3.5,1.4,0.2]])
+    # use bModel to make prediction on data point
+    if(bModel=='Logistic Regression'):
+        pred = lr2.predict(dp)
+    elif(bModel=='Random Forest'):
+        pred = rf2.predict(dp)
+    elif(bModel=='Decision Tree'):
+        pred = dt2.predict(dp)
+    elif(bModel=='SVM'):
+        pred = svm2.predict(dp)
+    elif(bModel=='Naive Bayes'):
+        pred = nb2.predict(dp)
+    elif(bModel=='Neural Network'):
+        pred = nn2.predict(dp)
+    print(categoryRF[int(pred[0])])
