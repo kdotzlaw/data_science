@@ -1,4 +1,5 @@
 
+import os
 import pandas as pd
 import numpy as np
 import seaborn as sns
@@ -23,7 +24,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-iris = pd.read_csv('Iris_Classification/Iris.csv')
+iris = pd.read_csv('Iris.csv')
 data = iris.iloc[:,1:]
 
 
@@ -308,7 +309,7 @@ def best_model(df,metrics):
     return bestModels
 
 if __name__ == '__main__':
-    
+    #print(os.getcwd())
    # descriptive_stats()
 
     #plots_scatter()
@@ -353,10 +354,10 @@ if __name__ == '__main__':
     # initialize model with optimal parameters
     print('Logistic Regression Tuned')
     lr2 = LogisticRegression(C=params['C'], penalty=params['penalty'], solver=params['solver'], max_iter=10000, random_state=0)
-    lrScore = model_eval(lr2, xTrain, yTrain, xTest, yTest)
+    lrScore2 = model_eval(lr2, xTrain, yTrain, xTest, yTest)
     
     #update model scores with lr score
-    score["Logistic Regression tuned"] = lrScore
+    score["Logistic Regression tuned"] = lrScore2
     print(score)
     
     
@@ -375,10 +376,10 @@ if __name__ == '__main__':
                                 min_samples_leaf=params['min_samples_leaf'],
                                 min_samples_split=params['min_samples_split'],
                                 random_state=20)
-    dtScore = model_eval(dt2, xTrain, yTrain, xTest, yTest)
+    dtScore2 = model_eval(dt2, xTrain, yTrain, xTest, yTest)
     
     #update model scores with dt score
-    score["Decision Tree tuned"] = dtScore
+    score["Decision Tree tuned"] = dtScore2
     print(score)
     
     '''-------Random Forest-----------'''
@@ -395,9 +396,9 @@ if __name__ == '__main__':
                               min_samples_leaf=params['min_samples_split'],
                               max_depth=params['max_depth'],
                               random_state=0)
-    rfScore=model_eval(rf2,xTrain,yTrain,xTest,yTest)
+    rfScore2=model_eval(rf2,xTrain,yTrain,xTest,yTest)
     #update model score
-    score["Random Forest tuned"] = rfScore
+    score["Random Forest tuned"] = rfScore2
     print(score)
 
     '''----------Support Vector Machine (SVM)----------'''
@@ -415,8 +416,8 @@ if __name__ == '__main__':
               degree=params['degree'],
               random_state=0,
               probability=True)
-    svmScore = model_eval(svm2, xTrain,yTrain,xTest,yTest)
-    score['SVM tuned']=svmScore
+    svmScore2 = model_eval(svm2, xTrain,yTrain,xTest,yTest)
+    score['SVM tuned']=svmScore2
     print(score)
 
     '''-----Naive Bayes----'''
@@ -429,9 +430,9 @@ if __name__ == '__main__':
     
     #initalize model with optimal parameters
     nb2=GaussianNB(var_smoothing=params['var_smoothing'])
-    nbScore = model_eval(nb2,xTrain,yTrain,xTest,yTest)
+    nbScore2 = model_eval(nb2,xTrain,yTrain,xTest,yTest)
     #update score
-    score["Naive Bayes tuned"] = nbScore
+    score["Naive Bayes tuned"] = nbScore2
     print(score)
 
     '''----Neural Network----'''
@@ -451,6 +452,7 @@ if __name__ == '__main__':
     score["Neural Network tuned"] = nnScore
    
     #write final scores to results.md
+    
     with open('results.md','w',encoding='utf-8') as f:
         f.write(score.to_markdown())
         print('wrote to file')
