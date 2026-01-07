@@ -275,8 +275,37 @@ def hp(model, xTrain, yTrain):
         gridSearch.fit(xTrain,yTrain)
         params = gridSearch.best_params_
 
+    elif(model=="Neural Network"):
+        #hp grid
+        grid={
+            'hidden_layer_sizes': np.arange(10,100,10),
+            'alpha': np.arange(0.0001,0.01,0.0001)
+        }
+        #init model
+        nn = MLPClassifier(random_state=0)
+        #repeated stratified kfold
+        rskf = RepeatedStratifiedKFold(n_splits=3,n_repeats=3,random_state=0)
+        #init randomSearchcv for cross validation
+        randomSearch = RandomizedSearchCV(nn,grid,n_iter=10,cv=rskf,n_jobs=-1)
+        #fit to training data
+        randomSearch.fit(xTrain,yTrain)
+        params = randomSearch.best_params_
     return params
     
+'''
+INPUT: the data frame, a list of metrics to use to find best model per metric
+OUTPUT: a dict of the best models for each metric
+PROCESS: find max value for each metric in dataframe & associated model
+'''
+def best_model(df,metrics):
+    bestModels = {}
+    for metric in metrics:
+        maxTest = df[metric+ ' Test'].max()
+        bestModelTest = df[df[metric+ ' Test']==maxTest].index[0]
+        bestModel = bestModelTest
+        bestModels[metric]=bestModel
+    return bestModels
+
 if __name__ == '__main__':
     
    # descriptive_stats()
@@ -322,8 +351,8 @@ if __name__ == '__main__':
     
     # initialize model with optimal parameters
     print('Logistic Regression Tuned')
-    lr = LogisticRegression(C=params['C'], penalty=params['penalty'], solver=params['solver'], max_iter=10000, random_state=0)
-    lrScore = model_eval(lr, xTrain, yTrain, xTest, yTest)
+    lr2 = LogisticRegression(C=params['C'], penalty=params['penalty'], solver=params['solver'], max_iter=10000, random_state=0)
+    lrScore = model_eval(lr2, xTrain, yTrain, xTest, yTest)
     
     #update model scores with lr score
     score["Logistic Regression tuned"] = lrScore
@@ -341,11 +370,11 @@ if __name__ == '__main__':
     params = hp("Decision Tree", xTrain, yTrain)
     
     #initialize model with optimal parameters
-    dt = DecisionTreeClassifier(max_depth=params['max_depth'], 
+    dt2 = DecisionTreeClassifier(max_depth=params['max_depth'], 
                                 min_samples_leaf=params['min_samples_leaf'],
                                 min_samples_split=params['min_samples_split'],
                                 random_state=20)
-    dtScore = model_eval(dt, xTrain, yTrain, xTest, yTest)
+    dtScore = model_eval(dt2, xTrain, yTrain, xTest, yTest)
     
     #update model scores with dt score
     score["Decision Tree tuned"] = dtScore
@@ -361,11 +390,11 @@ if __name__ == '__main__':
     params = hp("Random Forest",xTrain, yTrain)
 
     #initialize model with optimal parameters
-    rf=RandomForestClassifier(n_estimators=params['n_estimators'],
+    rf2=RandomForestClassifier(n_estimators=params['n_estimators'],
                               min_samples_leaf=params['min_samples_split'],
                               max_depth=params['max_depth'],
                               random_state=0)
-    rfScore=model_eval(rf,xTrain,yTrain,xTest,yTest)
+    rfScore=model_eval(rf2,xTrain,yTrain,xTest,yTest)
     #update model score
     score["Random Forest tuned"] = rfScore
     print(score)
@@ -380,12 +409,12 @@ if __name__ == '__main__':
     params=hp("SVM",xTrain, yTrain)
 
     #initialize model with optimal parameters
-    svm = SVC(C=params['C'],
+    svm2 = SVC(C=params['C'],
               kernel=params['kernel'],
               degree=params['degree'],
               random_state=0,
               probability=True)
-    svmScore = model_eval(svm, xTrain,yTrain,xTest,yTest)
+    svmScore = model_eval(svm2, xTrain,yTrain,xTest,yTest)
     score['SVM tuned']=svmScore
     print(score)
 
@@ -398,10 +427,38 @@ if __name__ == '__main__':
     params = hp("Naive Bayes",xTrain,yTrain)
     
     #initalize model with optimal parameters
-    nb=GaussianNB(var_smoothing=params['var_smoothing'])
-    nbScore = model_eval(nb,xTrain,yTrain,xTest,yTest)
+    nb2=GaussianNB(var_smoothing=params['var_smoothing'])
+    nbScore = model_eval(nb2,xTrain,yTrain,xTest,yTest)
     #update score
     score["Naive Bayes tuned"] = nbScore
     print(score)
 
     '''----Neural Network----'''
+    print("Neural Network")
+    #initialize model as Multi Layer Perceptron
+    nn = MLPClassifier(random_state=0)
+    nScore = model_eval(nn,xTrain,yTrain,xTest,yTest)
+    score["Neural Network"] = nScore
+    params = hp("Neural Network",xTrain,yTrain)
+
+    #initialize model with optimal parameters
+    nn2 = MLPClassifier(hidden_layer_sizes=params['hidden_layer_sizes'],
+                       alpha=params['alpha'],
+                       random_state=0)
+    nnScore = model_eval(nn2,xTrain, yTrain, xTest, yTest)
+    #update score
+    score["Neural Network tuned"] = nnScore
+   
+    #print final scores
+    print(score.to_markdown())
+
+    #remove overfitted models (ie precision/recall/f1 = 1 for training data)
+    #create difference column
+    scoreT = score.transpose()
+    #create list of models to remove bc of overfitting
+    remove_models = scoreT[scoreT['Recall Train']>=0.98].index
+    #create new data frame with non overfitted models
+    models = scoreT.drop(remove_models)
+    print(models)
+
+    '''Choosing the best model for each metric'''
