@@ -1,3 +1,4 @@
+
 import pandas as pd
 import numpy as np
 import seaborn as sns
@@ -449,8 +450,11 @@ if __name__ == '__main__':
     #update score
     score["Neural Network tuned"] = nnScore
    
-    #print final scores
-    print(score.to_markdown())
+    #write final scores to results.md
+    with open('results.md','w',encoding='utf-8') as f:
+        f.write(score.to_markdown())
+        print('wrote to file')
+    
 
     #remove overfitted models (ie precision/recall/f1 = 1 for training data)
     #create difference column
@@ -462,3 +466,9 @@ if __name__ == '__main__':
     print(models)
 
     '''Choosing the best model for each metric'''
+    metrics=['Precision','Recall','Accuracy','F1']
+    bestModels = best_model(models,metrics)
+    print("The best models are: \n")
+    for metric, bestModel in bestModels.items():
+        print(f"{metric}: {bestModel} - {models[metric+' Test'][bestModel].round(4)}")
+
