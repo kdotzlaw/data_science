@@ -34,6 +34,7 @@ PROCESS:
 '''
 
 def regressionLine(x,y,b):
+    plt.figure(figsize=(10,4))
     # plot points as scatter plot
     plt.scatter(x,y,color="m",marker="o",s=30)
 
@@ -46,12 +47,13 @@ def regressionLine(x,y,b):
     # label plot
     plt.xlabel('x')
     plt.ylabel('y')
+    plt.show()
 
-
-def main():
+if __name__ == '__main__':
     x = np.array([0,1,2,3,4,5,6,7,8,9])
     y = np.array([1,3,2,5,7,8,8,9,10,12])
 
     # estimate coefficients
     b = est_coef(x,y)
     print(f"Estimated coefficients: {b[0]} and {b[1]}")
+    regressionLine(x,y,b)
