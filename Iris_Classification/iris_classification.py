@@ -310,13 +310,13 @@ def best_model(df,metrics):
 
 if __name__ == '__main__':
     #print(os.getcwd())
-   # descriptive_stats()
+    descriptive_stats()
 
-    #plots_scatter()
+    plots_scatter()
     
-   # plots_multi()
+    plots_multi()
     
-   # correlation()
+    correlation()
    
    # encode species as numerical values
     labelEncoder = LabelEncoder()
