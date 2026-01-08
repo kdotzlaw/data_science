@@ -21,8 +21,6 @@ Merge the two datasets on `brewery_id` and `id` to create a joint dataset. Then,
 
 Determine the number of numerical values in each column for the series by finding the length of each column. `brewery_id` and `id` were not included.
 
-Results:
-
 |Column|Length|
 |---|---|
 |ibu|2410|
@@ -31,8 +29,6 @@ Results:
 
 #### Non-Null Values
 Find the number of non-null values in each numerical column (`brewery_id` and `id` not included) by using `count()`.
-
-Results:
 
 |Column|Non-Null Values|
 |---|---|
@@ -44,7 +40,6 @@ Then, determine the percentage of null values in each numerical column using the
 
 `((length_of_column - count_of_missing_values)/length_of_column)*100`
 
-Results:
 
 |Column|Percentage of Missing Values|
 |---|---|
@@ -55,8 +50,6 @@ Results:
 #### Minumum & Maximum Values
 Min and Max values of each numerical column (`brewery_id` and `id` not included) are determined using `min()` and `max()`.
 
-Results:
-
 |Column|Min|Max|
 |---|---|---|
 |ibu|4.0|20.0|
@@ -65,8 +58,6 @@ Results:
 
 #### Mean, Median, Mode, & Standard Deviations of Numerical Columns
 Mean, median, mode and standard deviations of each numerical column (`brewery_id` and `id` not included) are determined using the following functions: `mean()`, `median()`, `mode()`, `std()`.
-
-Results:
 
 |Column|Mean|Median|Mode|Standard Deviation|
 |---|---|---|---|---|
@@ -79,9 +70,6 @@ Quantile statistics are used to determine data spread, skewedness and outliers.
 To determine quantile statistics, split the data into equal sized groups using cut points (quantiles). For example:
 `beers['ibu'].quantile([0.25,0.5,0.75])`
 
-
-Results:
-
 |Column|0.25|0.5|0.75|
 |---|---|---|---|
 |ibu|21.0|35.0|64.0|
@@ -91,13 +79,18 @@ Results:
 #### Frequency Distribution Plots
 For each numerical column, use seaborn and pyplot to create distribution plots of numerical columns while dropping missing values.
 
+##### ibu Distribution
+![](ibu.png)
 
+##### abv Distribution
+![](abv.png)
 
+##### ounces Distribution
+![](ounces.png)
 
 ### Correlations of Numerical Values
 Correlations between numerical values are determined using Pearson's correlation coefficient and the `corr()` function.
 
-Results:
 ||abv|ibu|ounces|
 |---|---|---|---|
 |abv|1.0|0.670|0.172|
@@ -114,3 +107,4 @@ This indicates that ibu and abv are moderately correlated with 0.670, while ibu 
 |unique|2305|99|
 |top|Nonstop Hef Hop| American IPA|
 |freq|12|424|
+
