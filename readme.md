@@ -13,3 +13,9 @@ Basic implementations of simple linear regression and multiple linear regression
 
 ## [Titanic Survival Prediction](Titanic)
 Uses a random forest classifier to predict which passengers survive the Titanic. Achieved 83.8% accuracy.
+
+## [Content Based Movie Recommendation System](MovieRecommendations)
+
+Using a dataset of movies and associated credits, personalize movie recommendations using plot details and movie metadata. Created with Python, ast, sklearn, pandas, and numpy.
+
+## [Classifying Brain Tumors](BrainTumorClassification)
