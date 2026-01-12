@@ -80,7 +80,7 @@ def cnn(trainX, trainY, testX, testY):
 
 
 if __name__=='__main__':
-    path = "C:\\Users\\Katrina\\.cache\\kagglehub\\datasets\\navoneel\\brain-mri-images-for-brain-tumor-detection\\versions\\1"
+    path = "\BrainTumor"
     # load image directory
     img_paths = list(paths.list_images(path))
 
