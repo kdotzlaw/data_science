@@ -1,8 +1,26 @@
-import kagglehub
+'''
+A Content-Based recommendation system for movies
+'''
+import pandas as pd
+
+
+'''
+INPUT: 2 dataframes - credits, movies
+OUTPUT:
+PROCESS:
+'''
+def eda(credits, movies):
+    print("Viewing df heads...")
+    print(movies.head())
+    print(credits.head())
+
+    # Need
 
 
 if __name__ == '__main__':
-    # Download latest version
-    path = kagglehub.dataset_download("tmdb/tmdb-movie-metadata")
+    # create dataframes for exploratory data analysis
+    credits = pd.read_csv("tmdb_5000_credits.csv")
+    movies = pd.read_csv("tmdb_5000_movies.csv")
 
-    print("Path to dataset files:", path)
+    # explore data
+    eda(credits, movies)
