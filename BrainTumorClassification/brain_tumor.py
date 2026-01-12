@@ -80,7 +80,7 @@ def cnn(trainX, trainY, testX, testY):
 
 
 if __name__=='__main__':
-    path = "/BrainTumor"
+    path = "\BrainTumor"
     # load image directory
     img_paths = list(paths.list_images(path))
 
