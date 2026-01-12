@@ -18,6 +18,7 @@ from keras.optimizers import Adam
 
 
 
+
 '''
 INPUT:
 OUTPUT:
@@ -26,9 +27,8 @@ PROCESS:
 def plotImg(image):
     plt.imshow(image)
 
-
 '''
-INPUT: training and testing data
+INPUT: training,  testing data
 OUTPUT:
 DESC: 
 - A convoluted NN is deep and used to analyze images
@@ -65,7 +65,17 @@ def cnn(trainX, trainY, testX, testY):
    
     print(model.summary())
 
+    # hyperparameter tuning
+    #optimal = hp(model,trainX,trainY,testX,testY,trainGenerator)
 
+    batch_size = 8
+    train_steps = len(trainX) 
+    validation_steps = len(testX) 
+    epochs = 10
+
+    history = model.fit(trainGenerator.flow(trainX, trainY, batch_size= batch_size), steps_per_epoch= train_steps, validation_data = (testX, testY), validation_steps= validation_steps, epochs= epochs)
+
+    
 
 
 
@@ -88,7 +98,7 @@ if __name__=='__main__':
     #plotImg(images[0])
 
     # convert images[] and labels[] to np.arrays for normalizations
-    iamges = np.array(images)/255.0
+    images = np.array(images)/255.0
     labels = np.array(labels)
 
     # apply one-hot encoding to labels (ie transform to binary)
@@ -100,6 +110,7 @@ if __name__=='__main__':
     trainX, testX, trainY, testY = train_test_split(
                 images, labels,
                  test_size=0.10,random_state=42,stratify=labels)
-    
+    #print(f"Shape of images (x): {images.shape}")
+    #print(f"Shape of labels (y): {labels.shape}")
     # call cnn
     cnn(trainX, trainY, testX, testY)
