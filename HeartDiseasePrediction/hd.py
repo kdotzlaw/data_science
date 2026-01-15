@@ -18,16 +18,26 @@ if __name__=='__main__':
     df.rename(columns={'TenYearCHD':'CHD'},inplace=True)
     print(df.head())
 
-    # train-test split 80/20
-    trainX,trainY,testX,testY = train_test_split(df.iloc[:,:-1],df.iloc[:,-1],test_size=0.2)
-    # concat x,y train & test data
-    train = pd.concat([trainX,trainY],axis=1)
-    test = pd.concat([testX,testY],axis=1)
-    print(train.head())
-    # plot male CHD instances
-    sns.countplot(x=train['male'],hue=train['CHD'])
 
+    x = df.iloc[:,:-1]
+    y = df.iloc[:,-1]
+    trainX, testX, trainY, testY = train_test_split(x, y, test_size=0.20)
+    
+    train = pd.concat([trainX, trainY], axis=1)
+    test = pd.concat([testX, testY], axis=1)
+
+    ax = sns.countplot(x=train['male'], hue=train['CHD']) 
+    # change tick labels 0.0 and 1.0 for males
+    ax.set_xticklabels(['No','Yes'])
+    # change legend labels 0.0 and 1.0 for CHD
+    for text in ax.legend_.get_texts():
+        if text.get_text()=='0.0':
+            text.set_text("No")
+        elif text.get_text()=='1.0':
+            text.set_text("Yes")
+    plt.show()
+    
     # correlation heatmap of df
     plt.figure(figsize=(15,15))
     sns.heatmap(train.corr(),annot=True,linewidths=0.1)
-
+    plt.show()
