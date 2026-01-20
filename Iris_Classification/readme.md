@@ -343,9 +343,67 @@ All of the scores of the original and tuned model are virually the same, indicat
 
 ![SVM Confusion Matrix](svm.png)
 
+**Training Data**:
+- True positive for class X is 35
+- True positive for class Y  is 27
+- True positive for class Z  is 42
+**Test Data**:
+- True positive for class X is 15
+- True positive for class Y  is 21
+- True positive for class Z  is 8
+
+Classification Report Train
+|              |   precision |   recall |   f1-score |    support |
+|:-------------|------------:|---------:|-----------:|-----------:|
+| 0            |    1        | 1        |   1        |  35        |
+| 1            |    1        | 0.964286 |   0.981818 |  28        |
+| 2            |    0.976744 | 1        |   0.988235 |  42        |
+| accuracy     |    0.990476 | 0.990476 |   0.990476 |   0.990476 |
+| macro avg    |    0.992248 | 0.988095 |   0.990018 | 105        |
+| weighted avg |    0.990698 | 0.990476 |   0.990446 | 105        |
+
+ Classification Report Test
+|              |   precision |   recall |   f1-score |   support |
+|:-------------|------------:|---------:|-----------:|----------:|
+| 0            |    1        | 1        |   1        | 15        |
+| 1            |    1        | 0.954545 |   0.976744 | 22        |
+| 2            |    0.888889 | 1        |   0.941176 |  8        |
+| accuracy     |    0.977778 | 0.977778 |   0.977778 |  0.977778 |
+| macro avg    |    0.962963 | 0.984848 |   0.97264  | 45        |
+| weighted avg |    0.980247 | 0.977778 |   0.978173 | 45        |
+
+
 ##### Support Vector Machine Tuned
 
 ![SVM Tuned Confusion Matrix](svm_tuned.png)
+
+- True positive for class X is 35
+- True positive for class Y  is 28
+- True positive for class Z  is 42
+**Test Data**:
+- True positive for class X is 15
+- True positive for class Y  is 21
+- True positive for class Z  is 8
+
+Classification Report Train
+|              |   precision |   recall |   f1-score |   support |
+|:-------------|------------:|---------:|-----------:|----------:|
+| 0            |           1 |        1 |          1 |        35 |
+| 1            |           1 |        1 |          1 |        28 |
+| 2            |           1 |        1 |          1 |        42 |
+| accuracy     |           1 |        1 |          1 |         1 |
+| macro avg    |           1 |        1 |          1 |       105 |
+| weighted avg |           1 |        1 |          1 |       105 |
+
+ Classification Report Test
+|              |   precision |   recall |   f1-score |   support |
+|:-------------|------------:|---------:|-----------:|----------:|
+| 0            |    1        | 1        |   1        | 15        |
+| 1            |    1        | 0.954545 |   0.976744 | 22        |
+| 2            |    0.888889 | 1        |   0.941176 |  8        |
+| accuracy     |    0.977778 | 0.977778 |   0.977778 |  0.977778 |
+| macro avg    |    0.962963 | 0.984848 |   0.97264  | 45        |
+| weighted avg |    0.980247 | 0.977778 |   0.978173 | 45        |
 
 #### Results
 
