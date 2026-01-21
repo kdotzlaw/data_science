@@ -28,9 +28,20 @@ The CNN model is trained with:
 - `validation_split` to help with overfitting & generalization
 The loss and accuracy results are stored in the `history` variable for plotting model accuracy and loss.
 
+![](e1-20.PNG)
+
+After 20 epochs, accuracy is 0.8182, loss is 0.5139, validation_accuracy is 0.7934 and validation_loss is 0.6363.
+
+![](e21-30.PNG)
+
+After all 30 epochs, accuracy is 0.8439, loss is 0.45, validation_accuracy is 0.08007 and validation_loss is 0.6123.
+
+
 ![Accuracy & Loss](img_label.png)
 
-The more training cycles, the less training and validation loss, though there is more validation loss than training loss. Similarly the more training cycles, accuracy is higher for both training and validation data.
+The more training cycles, the less training and validation loss.  Similarly the more training cycles, accuracy is higher for both training and validation data.
+
+Overall, model accuracy is **84%** and model validation_accuracy is **80%**, with loss averaging about **0.62**.
 
 ## Model Prediction
 Recall that the possible labels are ['Airplane','Automobile','Bird','Cat','Deer','Dog','Frog','Horse','Ship','Truck'].
