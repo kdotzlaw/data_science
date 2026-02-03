@@ -383,10 +383,90 @@ class PlateFinder:
         if result:
             return result
 
+'''
+CLASS: OCR
+METHODS:
+- __init__: builds object with modelFile, labelFile
+'''
+class OCR:
+    # constructor
+    def __init__(self, modelFile, labelFile):
+        self.model_file = modelFile
+        self.label_file = labelFile
+        
+        # load labels, session, & graphs
+        self.label = self.loadLabel(self.label_file)
+        self.graph = self.loadGraph(self.model_file)
+        self.session = tf.compat.v1.Session(graph=self.graph, config=tf.compat.v1.ConfigProto())
+
+    '''
+    ----loadGraph()-----
+     INPUT: modelFile
+     OUTPUT: graph loaded from tensorflow
+     PROCESS: 
+    '''
+    def loadGraph(self, modelFile):
+        graph = tf.Graph()
+        graphDef = tf.compat.v1.GraphDef()
+
+        # open model file
+        with open(modelFile, "rb") as f:
+            graphDef.ParseFromString(f.read())
+
+        with graph.as_default():
+            tf.import_graph_def(graphDef)
+        return graph
+    
+
+    '''
+    ----loadLabel()-----
+     INPUT: label file
+     OUTPUT: stripped label
+     PROCESS: 
+    '''
+    def loadLabel(self, labelFile):
+        label = []
+        asciiLines = tf.io.gfile.GFile(labelFile).readLines()
+
+        # add asciiLines to label
+        for l in asciiLines:
+            label.append(l.rstrip())
+        return label
+
+    '''
+    ----convertTensor()-----
+     INPUT: 
+     OUTPUT: 
+     PROCESS: 
+    '''
+    def convertTensor(self, img, imgSizeOutput):
+        return
+    
+    '''
+    ----labelImg()-----
+     INPUT: 
+     OUTPUT: 
+     PROCESS: 
+    '''
+    def labelImg(self, tensor):
+        return
+    
+    '''
+    ----labelImgList()-----
+     INPUT: 
+     OUTPUT: 
+     PROCESS: 
+    '''
+    def labelImgList(self, listImgs, imgSizeOutput):
+        return
+
 if __name__=='__main__':
     # find the plate using FindPlate object
     plate = PlateFinder(minPlateArea=4100,maxPlateArea=15000)
 
     # create OCR model
-    
+    model = OCR(modelFile="binary_128_0.50_ver3.pb")
+    labelFile = "binary_128_0.50_labels_ver2.txt"
+
     # define video capture for testing
+    cap = cv2.VideoCapture("test.MOV")
