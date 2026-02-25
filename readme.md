@@ -20,7 +20,7 @@ Uses a random forest classifier to predict which passengers survive the Titanic.
 Using a dataset of movies and associated credits, personalize movie recommendations using plot details and movie metadata. Created with Python, ast, sklearn, pandas, and numpy.
 
 ## [Heart Disease Prediction Model](HeartDiseasePrediction)
-Developed and evaluated accuracy of various machine learning models in predicting heart disease development. Achieved 83.15% accuracy with Linear Regression.
+Developed and evaluated accuracy of various machine learning models in predicting heart disease development. Achieved 85.07% accuracy with Linear Regression.
 
 
 ## [Classifying Brain Tumors](BrainTumorClassification)
