@@ -176,6 +176,40 @@ def trainModel(trainX, trainY, testX, testY):
         print(f"{name} \n Train Accuracy: {trainScore:.2f}% \n Test Accuracy: {testScore:.2f}%")
         print(f"Training Time: {train_time:.4f}s, Test Time: {test_time:.4f}s")
 
+    # plot train & test accuracy scores
+    modelNames = list(models.keys())
+    x_pos = np.arange(len(modelNames))
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    sns.set_style("whitegrid")
+    ax.plot(x_pos, trainScores, marker='o', label='Train Accuracy', color=sns.color_palette("coolwarm", 2)[0])
+    ax.plot(x_pos, testScores, marker='s', label='Test Accuracy', color=sns.color_palette("coolwarm", 2)[1])
+
+    ax.set_xlabel('Model')
+    ax.set_ylabel('Accuracy (%)')
+    ax.set_title('Train vs Test Accuracy by Model')
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(modelNames, rotation=25, ha='right')
+    ax.set_ylim(80, 105)
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+
+    # plot train & test time
+    fig, ax = plt.subplots(figsize=(12, 6))
+    sns.set_style("whitegrid")
+    ax.plot(x_pos, trainTime, marker='o', label='Train Time', color=sns.color_palette("coolwarm", 2)[0])
+    ax.plot(x_pos, testTime, marker='s', label='Test Time', color=sns.color_palette("coolwarm", 2)[1])
+
+    ax.set_xlabel('Model')
+    ax.set_ylabel('Time (s)')
+    ax.set_title('Train vs Test Time by Model')
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(modelNames, rotation=25, ha='right')
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+
 if __name__ == "__main__":
     # read feature list
     with open('kddcup.names.txt','r') as f:

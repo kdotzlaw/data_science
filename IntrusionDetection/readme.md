@@ -11,10 +11,32 @@ A predictive model that can differentiate between bad connections, called intrus
 
 ## Data Preprocessing
 
+Read `kddcup.data_10_percent_corrected` into a dataframe.Create a dictionary of attack types & categories and then add `Attack Type` column to the dataframe using `lambda`.
 
+#### Plotting & Identifying Categorical Features
+- Find all categorical features and store them in `categories`
+- Remove `target` and `Attack Type` from `categories`
+- Plot categorical features
 
+![](Figure_1.png)
+**Figure 1**: Bar plot of `protocol_type` with the counts of icmp, tcp, udp
 
+![](Figure_2.png)
+**Figure 2**: Bar plot of the number of `logged_in` values, where 0 is not logged in and 1 is logged in
 
+![](Figure_3.png)
+**Figure 3**: Bar plot showing the number of different attack types (dos, normal, probe, r2l, u2r)
+
+#### Creating trainX and testX
+
+`trainX`and `testX` were created using the following process:
+- Drop `target` column from the dataframe
+- Filter the numeric columns into a seperate dataframe
+- Create target variable `y` with data from `Attack Type`
+- Create a feature matrix `x` with all data except `Attack Type`
+- Train/Test split (67/33) using `x` and `y`
+- Map `protocol_type` into integers and update `trainX` and `testX` with the mapping
+- Map `flag` into integers and update `trainX` and `testX` with the mapping
 
 ## Identifying Correlations
 
@@ -62,4 +84,27 @@ The process of training a model is:
 9. Calcualte accuracy scores for test data with `accuracy_score(testY, predTest)*100`
 
 ## Results
+
+|Model| Train Accuracy %| Prediction Accuracy % | Train Time| Prediciton Time|
+|-|-|-|-|-|
+| Naive Bayes | 87.99% | 88.28% | 0.92s | 1.25s |
+| Decision Tree | 90.05% | 87.64% | 1.57s | 0.08s |
+| Random Forest | 100% | 99.88% | 8.58s | 1.38s |
+| SVM | 99.69% | 99.68% | 7.86s | 0.13s |
+| Logistic Regression | 99.41% | 99.41% | 7.41s | 0.12s |
+| Gradient Boosting | 99.94% | 99.16% | 125.49s | 1.97s |
+
+![](result-acc.png)
+
+**Figure 6**: Model Training and Prediction Accuracy
+
+Random Forest, SVM, and Logistic Regression all having training and prediction accuracy close to 100%. Decision Tree has the lowest predicion accuracy with 87.64%. All models have training and prediction accuracy of >80%.
+
+![](result-time.png)
+
+**Figure 7**: Model Training Time and Prediction Time
+
+Naive Bayes has the fastest training and prediction time, while Gradient Boosting has the slowest. 
+
+
 
