@@ -11,7 +11,7 @@ A predictive model that can differentiate between bad connections, called intrus
 
 ## Data Preprocessing
 
-Read `kddcup.data_10_percent_corrected` into a dataframe.Create a dictionary of attack types & categories and then add `Attack Type` column to the dataframe using `lambda`.
+Read `kddcup.data_10_percent_corrected` into a dataframe. Create a dictionary of attack types & categories and then add `Attack Type` column to the dataframe using `lambda`.
 
 #### Plotting & Identifying Categorical Features
 - Find all categorical features and store them in `categories`
@@ -98,7 +98,7 @@ The process of training a model is:
 
 **Figure 6**: Model Training and Prediction Accuracy
 
-Random Forest, SVM, and Logistic Regression all having training and prediction accuracy close to 100%. Decision Tree has the lowest predicion accuracy with 87.64%. All models have training and prediction accuracy of >80%.
+The Random Forest Classifier performed the best with 100% training accuracy and 99.88% prediction accuracy. Decision Tree has the lowest predicion accuracy with 87.64%. All models have training and prediction accuracy of >80%.
 
 ![](result-time.png)
 
