@@ -19,7 +19,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.naive_bayes import GaussianNB
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.svm import SVC
+from sklearn.svm import LinearSVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 
@@ -73,7 +73,7 @@ def eda(df):
     testX['protocol_type'] = testX['protocol_type'].map(protomap)
 
     # map flag to ints & update train & test data
-    flagmap = {'SF':0, 'S0':1,'REJ':2,'RSTR':3,'RSTO':4,'SH':5,'S1':6,'S2':7,'RSTOS0':8,'S2':9,'OTH':10}
+    flagmap = {'SF':0, 'S0':1,'REJ':2,'RSTR':3,'RSTO':4,'SH':5,'S1':6,'S2':7,'RSTOS0':8,'S3':9,'OTH':10}
     trainX['flag'] = trainX['flag'].map(flagmap)
     testX['flag'] = testX['flag'].map(flagmap)
 
@@ -138,9 +138,9 @@ def trainModel(trainX, trainY, testX, testY):
         "Naive Bayes": GaussianNB(),
         "Decision Tree": DecisionTreeClassifier(criterion="entropy", max_depth=4),
         "Random Forest": RandomForestClassifier(n_estimators=30),
-        "SVM": SVC(gamma='scale'),
+        "SVM": LinearSVC(),
         "Logistic Regression": LogisticRegression(max_iter=1200000),
-        "Gradient Boosting": GradientBoostingClassifier(random_state=0),
+        "Gradient Boosting": GradientBoostingClassifier(n_estimators=30, max_depth=4, random_state=0),
     }
 
     trainScores = []
@@ -160,7 +160,7 @@ def trainModel(trainX, trainY, testX, testY):
         trainTime.append(train_time)
 
         # predictions
-        start = time.time
+        start = time.time()
         predTrain = model.predict(trainX)
         predTest  = model.predict(testX)
         end = time.time()
