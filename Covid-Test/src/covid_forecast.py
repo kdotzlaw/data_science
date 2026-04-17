@@ -1,8 +1,11 @@
+import os
 import pandas as pd
 import plotly.graph_objects as go
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
-df = pd.read_csv('day_wise.csv', parse_dates=['Date'])
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+df = pd.read_csv(os.path.join(_ROOT, 'data', 'day_wise.csv'), parse_dates=['Date'])
 
 # fit Holt-Winters exponential smoothing (additive trend, no seasonality)
 model = ExponentialSmoothing(
@@ -77,4 +80,4 @@ fig.update_layout(
     hovermode='x unified',
 )
 
-fig.write_html('covid_forecast.html', auto_open=True)
+fig.write_html(os.path.join(_ROOT, 'result', 'covid_forecast.html'), auto_open=True)

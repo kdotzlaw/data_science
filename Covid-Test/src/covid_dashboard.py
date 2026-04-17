@@ -1,6 +1,13 @@
+import os
+import sys
 import numpy as np
 import plotly.express as px
 from dash import Dash, html, dcc, Input, Output
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 from shared_utils import (
     COUNTRY_NAME_MAP,
     PLOTLY_GEO_LAYOUT,

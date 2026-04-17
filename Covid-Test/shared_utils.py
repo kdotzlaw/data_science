@@ -44,7 +44,7 @@ PLOTLY_GEO_LAYOUT = dict(
 )
 
 # Resolve data directory relative to this file
-_DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 
 
 def load_and_aggregate():

@@ -1,13 +1,20 @@
+import os
+import sys
 import numpy as np
 import plotly.express as px
 import pandas as pd
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 from shared_utils import (
     WORLDOMETER_TO_CLEAN_MAP,
     COUNTRY_NAME_MAP,
     PLOTLY_GEO_LAYOUT,
 )
 
-wm = pd.read_csv('worldometer_data.csv')
+wm = pd.read_csv(os.path.join(_ROOT, 'data', 'worldometer_data.csv'))
 wm = wm.dropna(subset=['Population'])
 
 # map worldometer names → csv names → plotly names
@@ -47,7 +54,7 @@ fig_cpm.update_layout(
     width=1000,
 )
 
-fig_cpm.write_html('covid_worldometer.html', auto_open=True)
+fig_cpm.write_html(os.path.join(_ROOT, 'result', 'covid_worldometer.html'), auto_open=True)
 
 # --- 2b: Healthcare Burden (horizontal bar chart) ---
 
@@ -76,4 +83,4 @@ fig_burden.update_layout(
     width=1000,
 )
 
-fig_burden.write_html('covid_healthcare_burden.html', auto_open=True)
+fig_burden.write_html(os.path.join(_ROOT, 'result', 'covid_healthcare_burden.html'), auto_open=True)

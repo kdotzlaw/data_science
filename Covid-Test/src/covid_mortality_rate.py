@@ -1,5 +1,12 @@
+import os
+import sys
 import numpy as np
 import plotly.express as px
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 from shared_utils import (
     COUNTRY_NAME_MAP,
     PLOTLY_GEO_LAYOUT,
@@ -44,4 +51,4 @@ fig.update_layout(
     width=1000,
 )
 
-fig.write_html('covid_mortality_rate.html', auto_open=True)
+fig.write_html(os.path.join(_ROOT, 'result', 'covid_mortality_rate.html'), auto_open=True)

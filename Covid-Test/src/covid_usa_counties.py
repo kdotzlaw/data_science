@@ -4,8 +4,10 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # --- Download and cache US counties GeoJSON ---
-GEOJSON_FILE = 'us_counties_geojson.json'
+GEOJSON_FILE = os.path.join(_ROOT, 'us_counties_geojson.json')
 GEOJSON_URL = 'https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json'
 
 if not os.path.exists(GEOJSON_FILE):
@@ -18,7 +20,7 @@ with open(GEOJSON_FILE) as f:
     counties = json.load(f)
 
 # --- Load and prepare data ---
-df = pd.read_csv('usa_county_wise.csv')
+df = pd.read_csv(os.path.join(_ROOT, 'data', 'usa_county_wise.csv'))
 df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%y')
 
 # drop null FIPS rows (aggregate entries like "Kansas City", correctional facilities)
@@ -73,4 +75,4 @@ fig.update_layout(
     width=1000,
 )
 
-fig.write_html('covid_usa_counties.html', auto_open=True)
+fig.write_html(os.path.join(_ROOT, 'result', 'covid_usa_counties.html'), auto_open=True)

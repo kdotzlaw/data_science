@@ -1,7 +1,10 @@
+import os
 import pandas as pd
 import plotly.express as px
 
-df = pd.read_csv('full_grouped.csv', parse_dates=['Date'])
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+df = pd.read_csv(os.path.join(_ROOT, 'data', 'full_grouped.csv'), parse_dates=['Date'])
 
 # aggregate to WHO Region level per date
 df = df.groupby(['Date', 'WHO Region'], as_index=False).agg({
@@ -22,4 +25,4 @@ fig = px.line(
 
 fig.update_layout(height=600, width=1000)
 
-fig.write_html('covid_who_regions.html', auto_open=True)
+fig.write_html(os.path.join(_ROOT, 'result', 'covid_who_regions.html'), auto_open=True)
