@@ -1,3 +1,17 @@
 dash>=2.14,<3.0
-dash-bio>=1.0.2
 pandas
+requests
+
+# dash-bio transitive deps that dash_bio.utils.__init__ imports eagerly.
+# (parmed is stubbed locally via parmed.py because it has no Windows wheel
+# and requires MSVC to build from source — see parmed.py for the reason.)
+periodictable
+biopython
+colour
+scikit-learn
+pyyaml
+GEOparse
+jsonschema
+
+# dash-bio itself must be installed with --no-deps to skip parmed. Run:
+#   pip install "dash-bio>=1.0.2" --no-deps

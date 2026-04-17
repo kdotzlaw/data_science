@@ -131,3 +131,204 @@ Reference (do not modify):
 9. Negative tests:
    - Upload a `.py` file → "File must have a .pdb extension".
    - Rename a non-PDB text file to `fake.pdb` and upload → "PDB contains no ATOM/HETATM records" or "Failed to parse PDB: ...".
+
+---
+
+# Expansion Plans
+
+Six independent expansions, ordered roughly by effort. Each can ship on its own; they compose cleanly because they all read from the existing `pdb-store` and layer new components/callbacks onto the current app. No breaking changes to [shared_utils.py](shared_utils.py)'s public API are needed — only additive functions.
+
+Shared conventions that every expansion follows:
+
+- New controls go into their own row (`html.Div(style=CONTROLS_ROW_STYLE)`) rather than cramming the existing one.
+- New data-producing callbacks write to `pdb-store` (or a sibling store) using `dash.callback_context` to coexist with [protein_dashboard.py:117](protein_dashboard.py#L117) `handle_upload`.
+- Helpers live in [shared_utils.py](shared_utils.py); only add a new module if the function exceeds ~50 lines.
+- Errors surface to the existing `upload-status` div — no new status regions unless the expansion truly needs one.
+
+## Expansion 1 — Fetch by PDB ID
+
+**Goal:** let users type a 4-char PDB ID (e.g. `1CRN`) and fetch from RCSB instead of downloading first.
+
+**UI additions** (new row above the upload area):
+- `dcc.Input(id='pdb-id-input', placeholder='e.g. 1CRN', debounce=True, maxLength=4)`
+- `html.Button('Fetch', id='fetch-pdb-btn', n_clicks=0)`
+
+**Callback changes:**
+- Merge upload + fetch into one callback that writes `pdb-store`, using `dash.ctx.triggered_id` to pick the source. Inputs: `Input('pdb-upload', 'contents')`, `Input('fetch-pdb-btn', 'n_clicks')`. State: `State('pdb-upload', 'filename')`, `State('pdb-id-input', 'value')`.
+- Single `handle_load` function replaces the existing `handle_upload` at [protein_dashboard.py:117](protein_dashboard.py#L117).
+
+**New helper in [shared_utils.py](shared_utils.py):**
+```python
+def fetch_pdb_by_id(pdb_id: str) -> tuple[dict | None, str | None]:
+    """GET https://files.rcsb.org/download/{ID}.pdb, parse, return (modelData, error)."""
+```
+- Validate with `re.fullmatch(r'[1-9][0-9A-Za-z]{3}', pdb_id)` (RCSB's format).
+- `requests.get(..., timeout=10)`; 404 → "No PDB entry for {id}"; timeout → "RCSB request timed out".
+- Reuse `_parse_pdb_text` on the response body.
+
+**Dependencies:** add `requests` to [requirements.txt](requirements.txt) (already transitively installed via GEOparse; make it explicit).
+
+**Verification:** type `1CRN`, click Fetch, viewer renders crambin; type `XXXX`, see 404 error; with airplane mode on, see timeout.
+
+**Effort:** ~30 LOC.
+
+## Expansion 2 — Residue / chain selector
+
+**Goal:** highlight specific chains or a residue range via `Molecule3dViewer.selectedAtomIds`.
+
+**UI additions** (new controls row):
+- `dcc.Dropdown(id='chain-filter', multi=True, placeholder='All chains')` — options populated dynamically from the loaded structure.
+- `dcc.Input(id='residue-range', type='text', placeholder='e.g. 10-50 or 10,15,20', debounce=True)`
+
+**New callbacks:**
+- Callback C: `Input('pdb-store', 'data')` → `Output('chain-filter', 'options')`. Derives options from `sorted({a['chain'] for a in atoms})`.
+- Callback D: `Input('pdb-store', 'data')` + `Input('chain-filter', 'value')` + `Input('residue-range', 'value')` → `Output('mol-viewer', 'selectedAtomIds')`.
+
+**New helper in [shared_utils.py](shared_utils.py):**
+```python
+def select_atom_indices(atoms: list, chains: list | None, residue_spec: str | None) -> list[int]:
+    """Return positional indices into `atoms` matching the filters."""
+```
+- Parse `residue_spec`: accept `'10-50'`, `'10,15,20'`, or `'10-50,70'` → set of `residue_index` values.
+- Empty selection → return `[]` (viewer shows nothing selected, all atoms still rendered).
+
+**Risks:** `selectedAtomIds` uses positional indices into the flattened atom list — confirm against [Molecule3dViewer](https://dash.plotly.com/dash-bio/molecule3dviewer) docs. If it uses atom `serial` instead, swap accordingly.
+
+**Verification:** load 4HHB, pick chains `['A', 'C']`, verify only those two chains highlight; type `1-10` in range input, verify first 10 residues highlight.
+
+**Effort:** ~40 LOC.
+
+## Expansion 3 — Sequence view
+
+**Goal:** render the one-letter amino acid sequence above the 3D view; clicking a residue focuses it in the viewer.
+
+**UI additions:**
+- `html.Div(id='sequence-view', style={'fontFamily': 'monospace', 'letterSpacing': '2px', 'marginBottom': '15px', 'overflowWrap': 'break-word'})` above the `mol-viewer` container.
+- Each residue is a clickable `html.Span` with a pattern-matching ID: `{'type': 'residue-span', 'chain': chain, 'index': residue_index}`. Chain labels as `html.Strong` between runs.
+
+**New callbacks:**
+- Callback E: `Input('pdb-store', 'data')` → `Output('sequence-view', 'children')`. Calls `build_sequence(atoms)`.
+- Callback F (pattern-matching): `Input({'type': 'residue-span', 'chain': ALL, 'index': ALL}, 'n_clicks')` → `Output('mol-viewer', 'selectedAtomIds')`. Uses `dash.ctx.triggered_id` to find which residue was clicked.
+
+**New helpers in [shared_utils.py](shared_utils.py):**
+```python
+AA_THREE_TO_ONE = {'ALA': 'A', 'ARG': 'R', ..., 'VAL': 'V'}  # 20 standard + 'X' fallback
+
+def build_sequence(atoms: list) -> list[tuple[str, int, str]]:
+    """Return [(chain, residue_index, one_letter_code), ...] in order."""
+```
+- Dedup on `(chain, residue_index)`, preserve insertion order from atoms.
+- Unknown residues → `'X'`.
+
+**Edge cases:** Callback F may conflict with Expansion 2's Callback D (both write `selectedAtomIds`). Resolve by merging: one combined callback that reads chain-filter + range input + last-clicked residue.
+
+**Verification:** load 1CRN, see `TTCCPSIVARSNFNVCRLPGTPEAICATYTGCIIIPGATCPGDYAN`; click `C` at position 3, viewer highlights just Cys3.
+
+**Effort:** ~60 LOC.
+
+## Expansion 4 — Structure stats panel
+
+**Goal:** replace the thin info line with an expandable details panel showing chain breakdown, residue composition, and (optional) Ramachandran plot.
+
+**UI changes:**
+- Replace `html.Div(id='info-panel')` at [protein_dashboard.py:113](protein_dashboard.py#L113) with:
+  ```python
+  html.Details([
+      html.Summary(id='info-summary'),   # one-line headline
+      html.Div(id='stats-body'),         # tables + charts
+  ], open=False)
+  ```
+
+**New callback:**
+- Callback G: `Input('pdb-store', 'data')` → `Output('info-summary', 'children')` + `Output('stats-body', 'children')`.
+
+**New helpers in [shared_utils.py](shared_utils.py) or a new `stats.py`:**
+```python
+def compute_chain_table(atoms) -> list[dict]:
+    """Rows: {'chain': 'A', 'residues': 46, 'atoms': 327}."""
+
+def compute_composition(atoms) -> dict[str, int]:
+    """{'ALA': 12, 'ARG': 8, ...} — counts by residue type."""
+
+def compute_ramachandran(atoms) -> tuple[list[float], list[float]]:
+    """Return (phi, psi) lists in degrees by iterating N/CA/C atom triplets per chain."""
+```
+
+**Rendering:**
+- Chain table: `html.Table` built from `compute_chain_table`.
+- Composition: `plotly.express.bar(composition)` in a `dcc.Graph`.
+- Ramachandran: `plotly.express.scatter(x=phi, y=psi, range_x=[-180,180], range_y=[-180,180])` — cheap for proteins up to ~10k residues.
+
+**Dependencies:** already have `plotly` via `dash`; no new installs.
+
+**Risks:** Ramachandran math uses NumPy dihedral angle calculation — ~20 LOC that's easy to get wrong. Gate it behind a checkbox so a broken calc doesn't block the rest of the panel.
+
+**Verification:** load 4HHB → table shows 4 chains × ~140 residues each; composition bar shows ~12% Ala/Lys/Leu; Ramachandran plot shows the characteristic two-cluster pattern.
+
+**Effort:** ~80 LOC (Ramachandran ~40 of those).
+
+## Expansion 5 — HETATM / ligand toggle
+
+**Goal:** show or hide non-protein atoms (ligands, waters, cofactors) independently of the main style.
+
+**Parser change** in [shared_utils.py](shared_utils.py#L73):
+- Add one field: `'is_hetatm': record == 'HETATM'` to each atom dict (one-line change in `_parse_pdb_text`).
+
+**UI addition** (slot into existing controls row):
+- `dcc.Checklist(id='hetatm-toggle', options=[{'label': 'Ligands & HETATM', 'value': 'show'}], value=['show'])`
+- `dcc.Dropdown(id='hetatm-style', options=[{'label':'Stick','value':'stick'},{'label':'Sphere','value':'sphere'}], value='stick')`
+
+**Callback change:**
+- Add `Input('hetatm-toggle', 'value')` and `Input('hetatm-style', 'value')` to the existing `restyle` callback at [protein_dashboard.py:143](protein_dashboard.py#L143).
+- Extend `create_mol3d_style` signature: `create_mol3d_style(atoms, visualization_type, color_element, show_hetatm=True, hetatm_visualization='stick')`. When `show_hetatm=False` and `atom['is_hetatm']` is True, emit `{'visualization_type': 'hidden', 'color': '#000000'}` (3dmol.js honors `hidden`). When True, override `visualization_type` with `hetatm_visualization` for those atoms.
+
+**Verification:** load 4HHB (has heme groups, HETATM), uncheck → hemes disappear; re-check and pick sphere → hemes render as sphere while the protein stays cartoon.
+
+**Effort:** ~20 LOC.
+
+## Expansion 6 — mmCIF support
+
+**Goal:** accept `.cif` files (RCSB's modern default format) alongside `.pdb`.
+
+**Parser addition** in [shared_utils.py](shared_utils.py):
+```python
+def _parse_cif_text(text: str) -> dict:
+    """Parse the _atom_site loop from an mmCIF file. Same output shape as _parse_pdb_text."""
+```
+- Find `loop_` block whose first header line starts with `_atom_site.`.
+- Collect header names in order (each `_atom_site.<field>` line).
+- Parse whitespace-separated data rows until the next `loop_` / `#` / `data_` boundary.
+- Map fields: `label_atom_id` → name, `type_symbol` → element, `label_comp_id` → residue_name, `label_asym_id` → chain, `label_seq_id` → residue_num, `Cartn_x/y/z` → positions, `group_PDB` → is_hetatm.
+
+**Dispatch in `parse_uploaded_pdb`:**
+- Rename the function to `parse_uploaded_structure` (keep a thin `parse_uploaded_pdb = parse_uploaded_structure` alias for backwards compat).
+- Branch on `filename.lower().endswith('.cif')` → `_parse_cif_text`; else `.pdb` → `_parse_pdb_text`.
+- Update error message: "File must have a .pdb or .cif extension".
+
+**UI change** in [protein_dashboard.py:52](protein_dashboard.py#L52):
+- `dcc.Upload(accept='.pdb,.cif,chemical/x-pdb,chemical/x-cif', ...)`
+
+**Fetch integration (if combined with Expansion 1):**
+- Add a radio `dcc.RadioItems(id='fetch-format', options=['pdb', 'cif'], value='pdb', inline=True)` next to the fetch button. RCSB URL: `https://files.rcsb.org/download/{id}.{fmt}`.
+
+**Edge cases:**
+- Quoted CIF values (e.g. `'CA 2+'`) — need to handle single-quoted tokens in the tokenizer.
+- Multi-block CIF files — take the first `data_` block only for v1.
+- Very large CIFs (100k+ atoms) — reuse the same parser; browser rendering is the real bottleneck.
+
+**Verification:** download `1CRN.cif` from RCSB, drag-drop, confirm same render as the `.pdb` version. Side-by-side atom counts should match exactly.
+
+**Effort:** ~100 LOC (tokenizer + loop parser).
+
+---
+
+## Suggested rollout order
+
+If implementing more than one, this order minimises rework:
+
+1. **Expansion 1 (Fetch by PDB ID)** — removes the friction of manual downloads; benefits every other expansion during testing.
+2. **Expansion 5 (HETATM toggle)** — trivial parser change; unblocks testing with realistic structures like hemoglobin.
+3. **Expansion 2 (Residue/chain selector)** — establishes the `selectedAtomIds` pattern that Expansion 3 reuses.
+4. **Expansion 3 (Sequence view)** — depends on #2's selection plumbing.
+5. **Expansion 4 (Stats panel)** — independent; purely additive.
+6. **Expansion 6 (mmCIF)** — independent; can slot in at any point.
