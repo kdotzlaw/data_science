@@ -1,6 +1,6 @@
 # Heart Disease (CHD) Prediction
 
-Uses `numpy`, `pandas`, `matplotlib.pyplot`, `seaborn`, and `sklearn` to preprocess heart disease data, create plots, train 3 models (logistic regression, decision tree, and random forest), and determine the optimal model for predictin heart disease development.
+Uses `numpy`, `pandas`, `matplotlib.pyplot`, `seaborn`, and `sklearn` to preprocess heart disease data, create plots, train 3 models (logistic regression, decision tree, and random forest), and determine the optimal model for predicting heart disease development.
 
 ## Data Preprocessing
 

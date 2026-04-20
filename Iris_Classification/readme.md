@@ -405,13 +405,3 @@ Classification Report Train
 | macro avg    |    0.962963 | 0.984848 |   0.97264  | 45        |
 | weighted avg |    0.980247 | 0.977778 |   0.978173 | 45        |
 
-#### Results
-
-
-### Naive Bayes
-
-### Neural Network (MLP)
-
-## Model Evaluation
-
-## Results

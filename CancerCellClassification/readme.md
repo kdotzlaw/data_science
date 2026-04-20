@@ -1,0 +1,1 @@
+A scikit-learn script that trains a Gaussian Naive Bayes classifier on the built-in breast cancer dataset to predict if a tumor is malignant or benign. Achieved 94.15% accuracy with a 67/33 train/test split.
