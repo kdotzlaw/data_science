@@ -337,16 +337,290 @@ Group assignment at the CLI: user supplies `--group-col` (metadata column name) 
 
 ## `src/eda.py` — EDA outputs
 
-Inputs: `expression`, `samples`, output directory.
+Inputs: `expression`, `samples`, output directory. Produces one text summary and four PNG plots under `result/<accession>/eda/`. This is the first matplotlib/seaborn module in the repo, so it also sets the style baseline (dpi, savefig args, figure-close discipline) for [src/volcano.py](src/volcano.py) and [src/heatmap.py](src/heatmap.py) later.
 
-Writes to `result/<accession>/eda/`:
-- `summary.txt` — dataset shape, sample count, gene count, per-sample NaN fraction, value range, detected log-scale (yes/no via median < 30 heuristic).
-- `sample_boxplots.png` — `seaborn.boxplot` of expression per sample (first 40 samples if more). Diagnoses batch effects.
-- `sample_correlation_heatmap.png` — `sns.heatmap(expression.corr(), cmap='viridis')` with samples grouped by metadata `group` if present.
-- `pca_scatter.png` — `sklearn.decomposition.PCA(n_components=2)` on `expression.T` (samples as rows). `matplotlib.pyplot.scatter` colored by `samples['group']`. Annotate % variance on axis labels.
-- `gene_variance_hist.png` — histogram of per-gene variance; sanity check that highly variable genes exist.
+### Design decisions
 
-No seaborn `clustermap` here — that lives in the heatmap module.
+- **Callable entry, not a procedural script.** [ge.py](ge.py) is the CLI orchestrator that loads data and calls into `src/` modules (see "`ge.py` — CLI orchestrator" section above). So `eda.py` exports `run_eda(expression, samples, output_dir)` rather than running top-to-bottom like [../Covid-Test/src/covid.py](../Covid-Test/src/covid.py). Keeps `ge.py` responsible for I/O and lets `run_eda` be reusable from the `all` subcommand.
+- **One private helper per output.** Five outputs, five `_write_*` / `_plot_*` helpers called in sequence. Easier to debug a single broken plot than a 200-line `run_eda`.
+- **Logger, not print.** Matches [shared_utils.py](shared_utils.py) convention. The CLI configures the root logger; `src/` modules stay quiet unless they have something useful to say.
+- **`samples['group']` is optional.** EDA may run before group assignment. Handle missing column by falling back to no-color / no-grouping rather than raising.
+- **`plt.close(fig)` after every save.** Without this, repeated CLI runs leak figures and seaborn's global style state bleeds between plots.
+
+### Module header
+
+```python
+"""Exploratory data analysis for a single GEO dataset.
+
+Writes one text summary plus four PNG plots to result/<accession>/eda/.
+Called by ge.py; not meant to be run directly. The caller is expected to
+have already invoked shared_utils.load_geo_dataset and (optionally)
+assign_groups before passing expression and samples in.
+"""
+
+from __future__ import annotations
+import logging
+import os
+import sys
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from shared_utils import detect_log_scale
+
+logger = logging.getLogger(__name__)
+
+_DPI = 200
+_SAVEFIG_KW = {'dpi': _DPI, 'bbox_inches': 'tight'}
+_MAX_BOXPLOT_SAMPLES = 40
+```
+
+The `_ROOT` block matches the existing Covid-Test pattern for `src/` scripts importing from their parent. `_SAVEFIG_KW` is a single source of truth for savefig args used in every plot helper. Note: only `detect_log_scale` is imported from `shared_utils` — do **not** call `normalize` here. EDA reports on the raw matrix as loaded; normalization is `diffex.py`'s concern.
+
+### Public entry function
+
+```python
+def run_eda(expression: pd.DataFrame,
+            samples: pd.DataFrame,
+            output_dir: str) -> None:
+    """Run all EDA outputs into output_dir (created if needed)."""
+    os.makedirs(output_dir, exist_ok=True)
+    logger.info("EDA on %d genes x %d samples -> %s",
+                expression.shape[0], expression.shape[1], output_dir)
+    _write_summary(expression, samples, output_dir)
+    _plot_sample_boxplots(expression, output_dir)
+    _plot_correlation_heatmap(expression, samples, output_dir)
+    _plot_pca(expression, samples, output_dir)
+    _plot_gene_variance(expression, output_dir)
+```
+
+Five sequential calls, no try/except — let any plot failure abort and surface the traceback. EDA is fast and idempotent; partial output is worse than a clean failure.
+
+### `_write_summary` — do this first; pure-text, easy to verify
+
+Pure-text output, no plotting — implement before any of the `_plot_*` helpers so the rest of `run_eda` has a known-good template to copy (logger pattern, output path, file handling).
+
+#### Signature
+
+```python
+def _write_summary(expression: pd.DataFrame,
+                   samples: pd.DataFrame,
+                   output_dir: str) -> None:
+    """Write summary.txt with shape, value range, NaN stats, and group counts."""
+```
+
+No return value, no exceptions caught — let pandas/numpy raise on bad input. Caller (`run_eda`) has already done `os.makedirs(output_dir, exist_ok=True)`, so this helper does not re-create the directory.
+
+#### Step-by-step implementation
+
+1. **Compute scalars up front** so the file-writing block is dumb formatting only. Use `expression.values` (a 2-D numpy array) for the global stats — `np.nanmin`/`np.nanmax`/`np.nanmedian` on the DataFrame work but emit a `FutureWarning` in pandas ≥ 2.1.
+
+   ```python
+   n_genes, n_samples = expression.shape
+   values = expression.values
+   value_min = float(np.nanmin(values))
+   value_max = float(np.nanmax(values))
+   value_median = float(np.nanmedian(values))
+   log_scale = detect_log_scale(expression)
+   ```
+
+   Cast to `float` — `np.nanmin` returns a numpy scalar; formatting a numpy float with `{:.3f}` works but the cast keeps the line type-stable for any future JSON dump.
+
+2. **Per-sample NaN fraction** — one fraction per column, then summarize with min/median/max:
+
+   ```python
+   nan_frac = expression.isna().mean(axis=0)  # Series, one entry per sample
+   nan_min = float(nan_frac.min())
+   nan_median = float(nan_frac.median())
+   nan_max = float(nan_frac.max())
+   ```
+
+   `axis=0` means "average across rows for each column" — the column is a sample, so this gives the fraction of probes that are NaN within each sample. `.min()`/`.max()` on an empty Series returns NaN; that only happens if `expression` has zero columns, which `load_geo_dataset` already rejects.
+
+3. **Group counts (optional)** — only if the caller assigned groups before calling `run_eda`:
+
+   ```python
+   if 'group' in samples.columns:
+       group_counts = samples['group'].value_counts(dropna=False).to_dict()
+   else:
+       group_counts = None
+   ```
+
+   `dropna=False` so unassigned samples (NaN in the group column) appear as a `nan` key — useful for spotting "I forgot to call assign_groups" without having to read the boxplot.
+
+4. **Build the output as a list of strings**, then join with newlines. Easier to read in code review than seven `f.write(...)` calls and trivially testable (you can assert against the list before writing).
+
+   ```python
+   lines = [
+       f"Genes (rows): {n_genes}",
+       f"Samples (cols): {n_samples}",
+       f"Value range: [{value_min:.3f}, {value_max:.3f}]",
+       f"Global median: {value_median:.3f}",
+       f"Detected log-scale: {log_scale}",
+       f"Per-sample NaN fraction: min={nan_min:.4f}, median={nan_median:.4f}, max={nan_max:.4f}",
+   ]
+   if group_counts is not None:
+       lines.append(f"Group counts: {group_counts}")
+   else:
+       lines.append("Group counts: <not assigned>")
+   ```
+
+   Always emit the seventh line — even when groups are unassigned — so downstream verification can count exactly seven lines without branching.
+
+5. **Write atomically-ish**: open with a context manager, trailing newline so the file is POSIX-correct.
+
+   ```python
+   path = os.path.join(output_dir, 'summary.txt')
+   with open(path, 'w', encoding='utf-8') as f:
+       f.write('\n'.join(lines) + '\n')
+   logger.info("wrote %s (%d genes x %d samples)", path, n_genes, n_samples)
+   ```
+
+   `encoding='utf-8'` is explicit because Windows defaults to cp1252 and group labels could contain non-ASCII characters from `characteristics_ch1`.
+
+#### Edge cases to be aware of
+
+- **All-NaN matrix** → `np.nanmin` raises a `RuntimeWarning` and returns NaN. `load_geo_dataset` already raises `ValueError` on an empty matrix after `dropna(how='all')`, but a matrix where every cell is NaN within at least one row would still slip through. Acceptable for v1 — the warning is loud enough; don't add code to suppress it.
+- **`samples` row order vs `expression` columns** — this helper does not rely on alignment. It reads `samples['group']` independently of `expression`. Don't add a sanity check; that belongs in `differential_expression`.
+- **Long group labels** — `value_counts().to_dict()` produces a `dict` whose `repr` can wrap awkwardly in a text editor. Acceptable; the file is for humans glancing at it, not parsing.
+
+#### Verification
+
+After running [test.py](test.py) (which calls `run_eda`), `result/GSE19804/eda/summary.txt` should contain exactly 7 lines. Concrete expectation for GSE19804 (Affymetrix HG-U133 Plus 2.0, log-scaled):
+
+```
+Genes (rows): 54675
+Samples (cols): 120
+Value range: [1.xxx, 14.xxx]
+Global median: 6.xxx
+Detected log-scale: True
+Per-sample NaN fraction: min=0.0000, median=0.0000, max=0.0xxx
+Group counts: {'tumor': 60, 'normal': 60}
+```
+
+If `Detected log-scale` is `False` here, something went wrong upstream (probably the SOFT file's `VALUE` column is raw intensity for this series — investigate before proceeding to diffex). If `Group counts` shows `<not assigned>`, the caller forgot `assign_groups` — re-run after fixing.
+
+### `_plot_sample_boxplots` — details
+
+```python
+def _plot_sample_boxplots(expression, output_dir):
+    n = expression.shape[1]
+    sub = expression.iloc[:, :_MAX_BOXPLOT_SAMPLES] if n > _MAX_BOXPLOT_SAMPLES else expression
+    fig, ax = plt.subplots(figsize=(max(6, sub.shape[1] * 0.25), 5))
+    sns.boxplot(data=sub, ax=ax, fliersize=1, linewidth=0.5)
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=90, fontsize=7)
+    ax.set_ylabel('Expression')
+    ax.set_title(f'Per-sample expression distribution (first {sub.shape[1]} of {n})')
+    fig.savefig(os.path.join(output_dir, 'sample_boxplots.png'), **_SAVEFIG_KW)
+    plt.close(fig)
+```
+
+Subset to the first 40 samples — the actual plot is unreadable above ~50 boxes. Width scales with sample count so labels don't crush.
+
+### `_plot_correlation_heatmap` — details
+
+```python
+def _plot_correlation_heatmap(expression, samples, output_dir):
+    corr = expression.corr()  # sample-sample correlation
+    if 'group' in samples.columns:
+        order = samples.dropna(subset=['group']).sort_values('group').index
+        order = [s for s in order if s in corr.index]
+        corr = corr.loc[order, order]
+    fig, ax = plt.subplots(figsize=(max(6, corr.shape[0] * 0.15),
+                                    max(5, corr.shape[0] * 0.15)))
+    sns.heatmap(corr, cmap='viridis', square=True, ax=ax,
+                xticklabels=False, yticklabels=False,
+                cbar_kws={'label': 'Pearson r'})
+    ax.set_title('Sample-sample correlation')
+    fig.savefig(os.path.join(output_dir, 'sample_correlation_heatmap.png'), **_SAVEFIG_KW)
+    plt.close(fig)
+```
+
+`expression.corr()` operates column-wise — perfect for sample-sample. Hide tick labels (they'd overlap into a smear above ~20 samples). Sorting by group makes the block-diagonal structure visible without needing colored side-bars.
+
+### `_plot_pca` — details
+
+```python
+def _plot_pca(expression, samples, output_dir):
+    mat = expression.dropna(axis=0, how='any')
+    if mat.empty:
+        logger.warning("PCA skipped: no genes without NaN")
+        return
+    X = StandardScaler().fit_transform(mat.T.values)  # samples as rows
+    pca = PCA(n_components=2)
+    coords = pca.fit_transform(X)
+    var = pca.explained_variance_ratio_ * 100
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    if 'group' in samples.columns:
+        for grp, sub in samples.groupby('group'):
+            idx = [samples.index.get_loc(s) for s in sub.index if s in samples.index]
+            ax.scatter(coords[idx, 0], coords[idx, 1], label=str(grp), s=30, alpha=0.8)
+        ax.legend(title='group')
+    else:
+        ax.scatter(coords[:, 0], coords[:, 1], s=30, alpha=0.8)
+    ax.set_xlabel(f'PC1 ({var[0]:.1f}%)')
+    ax.set_ylabel(f'PC2 ({var[1]:.1f}%)')
+    ax.set_title('PCA of samples')
+    fig.savefig(os.path.join(output_dir, 'pca_scatter.png'), **_SAVEFIG_KW)
+    plt.close(fig)
+```
+
+Three easy-to-miss details:
+1. **Transpose before PCA** — `expression.T` puts samples as rows (one observation per sample). Forgetting this is the most common bug; you'll get gene-PCA, not sample-PCA.
+2. **`StandardScaler()` first** — without it, high-variance genes dominate PC1 and the projection is dominated by a few outliers.
+3. **Drop NaN rows** — `sklearn.PCA` raises on NaN. Even after `load_geo_dataset`'s `dropna(how='all')` there may be rows with partial NaN.
+
+Color-by-group re-locates each sample's row in `samples.index` to index into `coords` — `samples` row order may not match `mat.T` row order.
+
+### `_plot_gene_variance` — details
+
+```python
+def _plot_gene_variance(expression, output_dir):
+    var = expression.var(axis=1).dropna()
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.hist(var, bins=80)
+    ax.set_xlabel('Per-gene variance')
+    ax.set_ylabel('Gene count')
+    ax.set_yscale('log')
+    ax.set_title('Per-gene variance distribution')
+    fig.savefig(os.path.join(output_dir, 'gene_variance_hist.png'), **_SAVEFIG_KW)
+    plt.close(fig)
+```
+
+`yscale='log'` is important — variance histograms are heavily right-skewed; on linear scale the long tail of high-variance genes (the interesting ones) is invisible.
+
+No seaborn `clustermap` here — that lives in [src/heatmap.py](src/heatmap.py).
+
+### Verification for `eda.py`
+
+Extend [test.py](test.py) with:
+
+```python
+import logging, os
+from src import eda
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+out = os.path.join('result', 'GSE19804', 'eda')
+eda.run_eda(exp, samp, out)
+print('outputs:', sorted(os.listdir(out)))
+```
+
+Expected:
+1. Five files appear in `result/GSE19804/eda/`: `summary.txt`, `sample_boxplots.png`, `sample_correlation_heatmap.png`, `pca_scatter.png`, `gene_variance_hist.png`.
+2. `summary.txt` reports ~54k genes × 120 samples, detected log-scale = `True`, group counts ~60 tumor / 60 normal.
+3. `pca_scatter.png` — tumor vs normal samples should separate visibly along PC1 or PC2 (strong lung-cancer signal in GSE19804).
+4. `sample_correlation_heatmap.png` — visible 2-block structure when sorted by group.
+5. Re-run; outputs are overwritten without error (idempotency check).
+
+If PC separation is weak, sanity-check that `samp['group']` was actually populated before calling `run_eda` — passing the un-grouped `sample` frame is the most likely bug.
 
 ## `src/diffex.py` — differential expression
 
