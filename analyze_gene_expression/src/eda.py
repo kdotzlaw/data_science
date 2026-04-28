@@ -94,12 +94,57 @@ def _plot_sample_boxplots(expression, output_dir):
 
 # create correlation heatmap --> output to /results
 def _plot_correlation_heatmap(expression, samples, output_dir):
-    return
+    # sample-sample correlation
+    corr = expression.corr()
+
+    # check for 'group' in samples for ordered corr
+    if 'group' in samples.columns:
+        order = samples.dropna(subset=['group']).sort_values('group').index
+        order = [s for s in order if s in corr.index]
+        corr = corr.loc[order,order]
+    # plot heatmat
+    fig, ax = plt.subplots(figsize=(max(6,corr.shape[0]*0.15),max(5,corr.shape[0]*0.15)))
+    sns.heatmap(corr,cmap='veridis',square=True,ax=ax,
+                 xticklabels=False, yticklabels=False,
+                 cbar_kws={'label':'Pearson r'})
+    ax.set_title('Sample-Sample Correlation')
+    fig.savefig(os.path.join(output_dir,'sample_correlation_heatmap.png'), **_SAVEFIG_KW)
+    plt.close(fig)
 
 # create  pca plot --> output to /results
 def _plot_pca(expression, samples, output_dir):
-    return
+    # drop na
+    mat = expression.dropna(axis=0,how='any')
+    if mat.empty:
+        logger.warning("PCA skipped: no genes without NaN")
+        return
 
+    # transpose expression to get sample pca
+    X = StandardScaler().fit_transform(mat.T.values) # samples as rows
+    pca = PCA(n_components=2)
+    coords = pca.fit_transform(X)
+
+    # get variance
+    var = pca.explained_variance_ratio_*100
+
+    # plot pca
+    fig, ax = plt.subplots(figsize=(7,6))
+
+    # if there are groups, plot like this
+    if 'group' in samples.columns:
+        for grp, sub in samples.groupby('group'):
+            index = [samples.index.get_loc(s) for s in sub.index if s in samples.index]
+            ax.scatter(coords[index,0],coords[index,1],label=str(grp),s=30,alpha=0.8)
+        ax.legend(title='group')
+    else:
+        ax.scatter(coords[:,0],coords[:,1],s=30,alpha=0.8)
+    ax.set_xlabel(f"PC1 ({var[0]:.1f}%)")
+    ax.set_ylabel(f"PC2 ({var[1]:.1f}%)")
+    ax.set_title("PCA of samples")
+
+    fig.savefig(os.path.join(output_dir,'pca_scatter.png'),**_SAVEFIG_KW)
+    plt.close(fig)
+    
 # create gene variance plot --> output to /results
 def _plot_gene_variance(expression, output_dir):
     return
