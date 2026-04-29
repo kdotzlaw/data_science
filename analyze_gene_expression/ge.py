@@ -100,6 +100,17 @@ def _cmd_eda(args: argparse.Namespace) -> None:
     out = os.path.join(_accession_dir(args.accession), 'eda')
     eda.run_eda(expression,samples, out)
 
+def _cmd_diffex(args: argparse.Namespace) -> None:
+    expression, samples, annotation = _load_and_group(
+        args.accession, args.group_col, args.group_a, args.group_b
+    )
+    diffex.run_diffex(
+        expression, samples, annotation,
+        args.group_a, args.group_b,
+        output_dir=_accession_dir(args.accession)
+    )
+
+
 def main(argv: list[str] | None=None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)

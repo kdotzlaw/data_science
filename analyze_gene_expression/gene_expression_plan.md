@@ -624,11 +624,223 @@ If PC separation is weak, sanity-check that `samp['group']` was actually populat
 
 ## `src/diffex.py` — differential expression
 
-1. Call `shared_utils.load_geo_dataset`.
-2. Apply `normalize(expression, 'log2')` if the data isn't already log-scaled (reuse the EDA heuristic).
-3. Call `shared_utils.assign_groups` + `shared_utils.differential_expression`.
-4. Write `result/<accession>/de.csv` — full table, one row per gene.
-5. Print top-10 by `adj_p_value` to stdout.
+Wraps `shared_utils.differential_expression` with the boilerplate that every caller would otherwise duplicate: log-scale detection, group assignment, optional probe-to-symbol collapsing, CSV emission, and a printable head. The actual t-test math lives in [shared_utils.py](shared_utils.py) — this module is glue, not statistics.
+
+### Design decisions
+
+- **Callable entry, not a procedural script.** Mirrors [src/eda.py](src/eda.py): `ge.py` owns I/O and dispatches to a function. `run_diffex(expression, samples, annotation, group_a, group_b, output_dir)` is the shape, returning the `de_results` DataFrame so the `all` orchestrator in `ge.py` can hand it straight to volcano/heatmap without a CSV round-trip.
+- **Log-scale detection happens here, not in `ge.py`.** The CLI doesn't need to know that diffex requires log-scaled inputs — that's a concern of the diffex pipeline. `ge.py`'s `_cmd_diffex` currently runs `detect_log_scale` itself; move that responsibility into `run_diffex` and simplify the handler.
+- **Probe collapsing is opt-in.** Some downstream uses (volcano, heatmap) want one row per probe; others (`compare`) need one row per `gene_symbol`. Provide a `collapse_to_gene` flag, default `False` — diffex emits the full probe-level table by default, callers ask for collapse explicitly.
+- **CSV is a side effect, not the return value.** Returning the DataFrame keeps the function composable; writing the CSV when `output_dir` is given keeps the CLI ergonomics intact. Two responsibilities, one function — acceptable because they're inseparable in practice (every caller wants both).
+- **No try/except.** Same convention as `eda.py` — let `differential_expression`'s `ValueError`s propagate. The user runs from the CLI; a stack trace is more useful than a swallowed error.
+
+### Module header
+
+```python
+"""Differential expression for a single GEO dataset.
+
+Wraps shared_utils.differential_expression with log-scale auto-detection,
+optional probe-to-symbol collapsing, and CSV emission. Called by ge.py;
+not meant to be run directly.
+"""
+
+from __future__ import annotations
+import logging
+import os
+import sys
+
+import numpy as np
+import pandas as pd
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+import shared_utils as su
+
+logger = logging.getLogger(__name__)
+
+_DE_CSV_NAME = 'de.csv'
+_HEAD_N = 10
+```
+
+The `_ROOT`/sys.path block matches [src/eda.py](src/eda.py) — keep the pattern identical so future `src/` modules can copy it. Importing `shared_utils as su` (not `from shared_utils import ...`) makes the call sites `su.differential_expression(...)` — easier to grep for and matches [test.py](test.py)'s convention.
+
+### Public entry function
+
+```python
+def run_diffex(
+    expression: pd.DataFrame,
+    samples: pd.DataFrame,
+    annotation: pd.DataFrame | None,
+    group_a: str,
+    group_b: str,
+    output_dir: str | None = None,
+    *,
+    group_col: str = 'group',
+    collapse_to_gene: bool = False,
+    print_head: bool = True,
+) -> pd.DataFrame:
+    """Run diff-expression and (optionally) write de.csv to output_dir.
+
+    Returns the de_results DataFrame. If output_dir is given, also writes
+    {output_dir}/de.csv. If print_head, writes the top-10 rows to stdout.
+    """
+```
+
+The keyword-only divider (`*`) forces callers to spell out the optional knobs — `collapse_to_gene=True` is the kind of flag that should never be a positional surprise. `output_dir` is positional-but-optional so the typical CLI invocation (`run_diffex(exp, samp, ann, 'tumor', 'normal', out_dir)`) reads naturally.
+
+### Step-by-step implementation
+
+1. **Validate group assignment up front.** `shared_utils.differential_expression` will raise its own `ValueError` if `group_col` is missing, but the message is opaque ("group_col 'group' not in samples"). Catch the missing-group-column case here with a more actionable error — diffex is the typical first place users notice they forgot `assign_groups`:
+
+   ```python
+   if group_col not in samples.columns:
+       raise ValueError(
+           f"samples missing column {group_col!r}. "
+           f"Did you call shared_utils.assign_groups before run_diffex? "
+           f"Available columns: {list(samples.columns)}"
+       )
+   ```
+
+   Don't validate `group_a` / `group_b` membership — let `differential_expression` raise its "fewer than 2 samples in group X" error, which already includes the count.
+
+2. **Auto-log if needed.** Reuse the heuristic from EDA — if the matrix doesn't look log-scaled, transform once. Log it loudly so the user can spot misclassification:
+
+   ```python
+   if su.detect_log_scale(expression):
+       logger.info("expression detected as log-scale; skipping log2 transform")
+       expr_log = expression
+   else:
+       logger.info("expression looks raw-intensity; applying log2 transform")
+       expr_log = su.normalize(expression, 'log2')
+   ```
+
+   Bind to a new name (`expr_log`) — don't reassign `expression`. Keeping the original around is cheap and means a downstream bug ("why is `expression` modified?") can't blame this function. `shared_utils.normalize` already returns a copy, so this is correctness-via-naming, not via copying.
+
+3. **Restrict to the two groups before testing.** `differential_expression` filters internally, but doing it here means the log message at step 2 reflected the matrix actually used and any `print_head` output below references the right shape:
+
+   ```python
+   expr_two, samp_two = su.subset_by_group(expr_log, samples, [group_a, group_b])
+   logger.info(
+       "diffex: %d genes x %d samples (%s=%d, %s=%d)",
+       expr_two.shape[0], expr_two.shape[1],
+       group_a, (samp_two[group_col] == group_a).sum(),
+       group_b, (samp_two[group_col] == group_b).sum(),
+   )
+   ```
+
+   `subset_by_group` is shared with heatmap; using it here keeps the "drop unassigned samples" rule centralized.
+
+4. **Run the t-test.** One call into `shared_utils`:
+
+   ```python
+   de = su.differential_expression(
+       expr_two, samp_two, group_a, group_b,
+       annotation=annotation, group_col=group_col,
+   )
+   ```
+
+   The returned frame is sorted by `adj_p_value` ascending with NaNs last (per the `differential_expression` spec). Don't re-sort.
+
+5. **Optional probe-to-gene collapse.** Only if requested. Strategy: keep the row with the smallest `adj_p_value` per `gene_symbol`. NaN symbols are dropped (probes that never mapped to a gene aren't useful for cross-platform comparison):
+
+   ```python
+   if collapse_to_gene:
+       if 'gene_symbol' not in de.columns:
+           raise ValueError(
+               "collapse_to_gene=True but de_results has no gene_symbol column. "
+               "Pass an annotation frame to run_diffex."
+           )
+       before = len(de)
+       de = (
+           de.dropna(subset=['gene_symbol'])
+             .sort_values('adj_p_value', na_position='last')
+             .drop_duplicates(subset='gene_symbol', keep='first')
+             .reset_index(drop=True)
+       )
+       logger.info("collapsed %d probes -> %d genes", before, len(de))
+   ```
+
+   `keep='first'` after sort-by-`adj_p_value` is the "smallest p wins" rule. `na_position='last'` makes NaN p-values lose to any real p-value during the dedupe.
+
+6. **Write CSV (when `output_dir` is given).** `os.makedirs` with `exist_ok=True` so callers don't have to pre-create the directory. Float format keeps the file readable in a text editor without losing precision for the tail-end small p-values:
+
+   ```python
+   if output_dir is not None:
+       os.makedirs(output_dir, exist_ok=True)
+       csv_path = os.path.join(output_dir, _DE_CSV_NAME)
+       de.to_csv(csv_path, index=False, float_format='%.6g')
+       logger.info("wrote %s (%d rows)", csv_path, len(de))
+   ```
+
+   `index=False` because the index after `differential_expression` is just `0..N-1` — meaningful information lives in the columns. `'%.6g'` keeps `1.234e-15`-style scientific notation for tiny p-values; `'%.6f'` would round them all to zero.
+
+7. **Print head (when `print_head`).** Stdout, not logger — this is user-facing tabular output, not diagnostic noise:
+
+   ```python
+   if print_head:
+       cols = [c for c in ('probe_id', 'gene_symbol', 'log2FC', 'adj_p_value') if c in de.columns]
+       print(de[cols].head(_HEAD_N).to_string(index=False))
+   ```
+
+   Project four columns, not the full eight — the t-statistic and per-group means are useful in the CSV but clutter the terminal. Omit columns that don't exist (e.g. no `gene_symbol` when `annotation is None`).
+
+8. **Return the frame.**
+
+   ```python
+   return de
+   ```
+
+### Edge cases to be aware of
+
+- **All samples filtered out by `subset_by_group`.** Happens when the user typed the wrong `--group-a` / `--group-b` (e.g. `Tumor` vs the metadata's `tumor`). `differential_expression` catches this via its "fewer than 2 samples" check, but the message names the case-sensitive label the user passed. Acceptable — error is actionable.
+- **Annotation has duplicate `gene_symbol` entries.** Different probes mapping to the same gene is normal for microarrays. The collapse step (step 5) handles this. If `collapse_to_gene=False`, the CSV will contain multiple rows for the same gene — also fine, that's what the caller asked for.
+- **`expression` and `samples` index mismatch.** Already handled by `shared_utils.differential_expression`'s precondition check ("Expression columns must be a superset of the filtered sample IDs"). Don't re-validate here.
+- **Re-running diffex with different group definitions** overwrites `de.csv`. Acceptable — `de.csv` is regenerable, not source of truth. Document this in [readme.md](readme.md).
+- **Empty `de` after collapse.** Happens only if every probe has a NaN `gene_symbol` — implies broken annotation. The empty CSV is written and the print head is empty; subsequent volcano/heatmap calls will fail with "no rows" errors that are obvious enough not to need pre-emptive guarding.
+
+### `ge.py` integration
+
+The handler in `ge.py` (`_cmd_diffex` in the CLI section) currently calls `shared_utils.differential_expression` directly. Replace its body with one call into `run_diffex`:
+
+```python
+def _cmd_diffex(args: argparse.Namespace) -> None:
+    expression, samples, annotation = _load_and_group(
+        args.accession, args.group_col, args.group_a, args.group_b
+    )
+    diffex.run_diffex(
+        expression, samples, annotation,
+        args.group_a, args.group_b,
+        output_dir=_accession_dir(args.accession),
+    )
+```
+
+The `all` handler likewise drops its inline `detect_log_scale`/`normalize`/`differential_expression` block and calls `run_diffex(..., print_head=False)` — the head printout is noise inside the multi-step pipeline.
+
+### Verification
+
+Extend [test.py](test.py) with:
+
+```python
+import logging, os
+from src import diffex
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+out = os.path.join('result', 'GSE19804')
+de = diffex.run_diffex(exp, samp, ann, 'tumor', 'normal', output_dir=out)
+print('shape:', de.shape, 'cols:', list(de.columns))
+print('csv exists:', os.path.exists(os.path.join(out, 'de.csv')))
+```
+
+Expected for GSE19804 (lung cancer tumor vs normal, ~54k probes, 60+60 samples):
+
+1. Log line `expression detected as log-scale; skipping log2 transform` (GSE19804 ships log2-scaled).
+2. Log line `diffex: 54675 genes x 120 samples (tumor=60, normal=60)`.
+3. Returned `de.shape` is `(54675, 8)` — 8 columns: `probe_id, gene_symbol, log2FC, mean_a, mean_b, t_stat, p_value, adj_p_value`.
+4. `result/GSE19804/de.csv` exists, ~54k+1 lines (header + rows), file size in the low MBs.
+5. Top-10 head printed to stdout includes well-known lung-cancer markers — `SPP1`, `MMP1`, `MMP12`, `WIF1`, `AGER` are all known to be in the top hits for this series.
+6. Re-run with `collapse_to_gene=True`: row count drops from ~54675 to ~21000 (one row per unique gene symbol, minus probes with no symbol). Log line confirms the collapse.
+7. Re-run with `print_head=False, output_dir=None`: nothing printed, no CSV written, just the in-memory frame returned. Confirms the side-effect-free path works.
 
 ## `src/volcano.py` — volcano plot
 

@@ -104,7 +104,7 @@ def _plot_correlation_heatmap(expression, samples, output_dir):
         corr = corr.loc[order,order]
     # plot heatmat
     fig, ax = plt.subplots(figsize=(max(6,corr.shape[0]*0.15),max(5,corr.shape[0]*0.15)))
-    sns.heatmap(corr,cmap='veridis',square=True,ax=ax,
+    sns.heatmap(corr,cmap='viridis',square=True,ax=ax,
                  xticklabels=False, yticklabels=False,
                  cbar_kws={'label':'Pearson r'})
     ax.set_title('Sample-Sample Correlation')
@@ -144,10 +144,23 @@ def _plot_pca(expression, samples, output_dir):
 
     fig.savefig(os.path.join(output_dir,'pca_scatter.png'),**_SAVEFIG_KW)
     plt.close(fig)
-    
+
 # create gene variance plot --> output to /results
 def _plot_gene_variance(expression, output_dir):
-    return
+    # get variance
+    var = expression.var(axis=1).dropna()
+
+    # plot
+    fig,ax = plt.subplots(figsize=(7,4))
+    ax.hist(var,bins=80)
+    ax.set_xlabel('Per-gene variance')
+    ax.set_ylabel('Gene count')
+    # use log scale to help hist be less right skewed
+    ax.set_yscale('log')
+    ax.set_title('Per-gene Variance Distribution')
+
+    fig.savefig(os.path.join(output_dir,'gene_variance_hist.png'),**_SAVEFIG_KW)
+    plt.close(fig)
 
 # Public entry function
 def run_eda(expression: pd.DataFrame, samples:pd.DataFrame, output_dir: str)->None:
@@ -160,8 +173,12 @@ def run_eda(expression: pd.DataFrame, samples:pd.DataFrame, output_dir: str)->No
 
     # boxplots
     _plot_sample_boxplots(expression, output_dir)
+
     # correlation
+    _plot_correlation_heatmap(expression,samples,output_dir)
 
     # pca
+    _plot_pca(expression,samples,output_dir)
 
     # gene variance
+    _plot_gene_variance(expression,output_dir)

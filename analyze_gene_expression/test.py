@@ -1,6 +1,7 @@
 import shared_utils as su
 import logging, os
 from src import eda
+from src import diffex
 
 # test shared_utils
 exp, sample, ann = su.load_geo_dataset('GSE19804')
@@ -18,5 +19,9 @@ out = os.path.join('result', 'GSE19804', 'eda')
 eda.run_eda(exp, samp, out)
 print('outputs:', sorted(os.listdir(out)))
 
-
-
+# test diffex
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+out = os.path.join('result', 'GSE19804')
+de = diffex.run_diffex(exp, samp, ann, 'tumor', 'normal', output_dir=out)
+print('shape:', de.shape, 'cols:', list(de.columns))
+print('csv exists:', os.path.exists(os.path.join(out, 'de.csv')))
