@@ -64,6 +64,12 @@ def _build_parser() -> argparse.ArgumentParser:
     eda_p.add_argument('--group-a')
     eda_p.add_argument('--group-b')
 
+    # ----- diffex -----
+    diff_p = sub.add_parser('diffex', help='run differential expression and write de.csv')
+    diff_p.add_argument('--accession', required=True, help="GEO series accession (e.g. GSE19804) ")
+    diff_p.add_argument('--group-col', required=True, help="Metadata column for group assignment")
+    diff_p.add_argument('--group-a', required=True, help="Substring identifying group A samples")
+    diff_p.add_argument('--group-b', required=True, help="Substring identifying group B samples")
 
     # ---- all ----
     all_p = sub.add_parser('all', help='run eda -> diffex -> volcano -> heatmap end-to-end')
