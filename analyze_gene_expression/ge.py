@@ -71,6 +71,14 @@ def _build_parser() -> argparse.ArgumentParser:
     diff_p.add_argument('--group-a', required=True, help="Substring identifying group A samples")
     diff_p.add_argument('--group-b', required=True, help="Substring identifying group B samples")
 
+    # ----- volano -----
+    volc_p = sub.add_parser('volcano', help='render volcano plot from a de.csv')
+    volc_p.add_argument('--accession', required=True)
+    volc_p.add_argument('--from-results', help='path to de.csv (default: result/<acc>/de.csv)')
+    volc_p.add_argument('--adj-p-max', type=float, default=0.05)
+    volc_p.add_argument('--abs-log2fc-min', type=float, default=1.0)
+    volc_p.add_argument('--annotate-top', type=int, default=10)
+
     # ---- all ----
     all_p = sub.add_parser('all', help='run eda -> diffex -> volcano -> heatmap end-to-end')
     all_p.add_argument('--accession', required=True)
@@ -114,6 +122,17 @@ def _cmd_diffex(args: argparse.Namespace) -> None:
         expression, samples, annotation,
         args.group_a, args.group_b,
         output_dir=_accession_dir(args.accession)
+    )
+
+def _cmd_volcano(args: argparse.Namespace) -> None:
+    de = pd.read_csv(_de_csv_path(args.accession, args.from_results))
+    out_png = os.path.join(_accession_dir(args.accession),'volcano.png')
+    volcano.plot_volcano(
+        de,
+        out_png,
+        adj_p_max=args.adj_p_max,
+        abs_log2fc_min=args.abs_log2fc_min,
+        annotate_top=args.annotate_top,
     )
 
 

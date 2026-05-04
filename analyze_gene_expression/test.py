@@ -1,7 +1,8 @@
 import shared_utils as su
 import logging, os
-from src import eda
-from src import diffex
+import pandas as pd
+from src import eda, diffex, volcano
+
 
 # test shared_utils
 exp, sample, ann = su.load_geo_dataset('GSE19804')
@@ -14,10 +15,11 @@ de = su.differential_expression(su.normalize(exp,'log2'),samp, 'tumor','normal',
 print(de.head())
 
 # test eda
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+'''logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 out = os.path.join('result', 'GSE19804', 'eda')
 eda.run_eda(exp, samp, out)
 print('outputs:', sorted(os.listdir(out)))
+'''
 
 # test diffex
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -25,3 +27,10 @@ out = os.path.join('result', 'GSE19804')
 de = diffex.run_diffex(exp, samp, ann, 'tumor', 'normal', output_dir=out)
 print('shape:', de.shape, 'cols:', list(de.columns))
 print('csv exists:', os.path.exists(os.path.join(out, 'de.csv')))
+
+# test volcano
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+de = pd.read_csv(os.path.join('result', 'GSE19804', 'de.csv'))
+out_png = os.path.join('result', 'GSE19804', 'volcano.png')
+volcano.plot_volcano(de, out_png)
+print('volcano exists:', os.path.exists(out_png))

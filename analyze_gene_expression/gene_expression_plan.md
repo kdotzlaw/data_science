@@ -844,7 +844,49 @@ Expected for GSE19804 (lung cancer tumor vs normal, ~54k probes, 60+60 samples):
 
 ## `src/volcano.py` — volcano plot
 
-Inputs: a `de_results` DataFrame (or path to the `de.csv` written by `diffex.py`).
+Inputs: a `de_results` DataFrame (or path to the `de.csv` written by `diffex.py`). One PNG output. Sibling module to [src/eda.py](src/eda.py) and [src/diffex.py](src/diffex.py); follows the same callable-entry, logger, no-try/except conventions.
+
+### Design decisions
+
+- **DataFrame in, path out.** `plot_volcano(de_results, output_path, ...)` — the caller is responsible for loading `de.csv` and computing the path. Mirrors [src/heatmap.py](src/heatmap.py) and keeps `volcano.py` ignorant of the `result/<accession>/...` scheme.
+- **Three scatter calls, not one.** Plotting up/down/non-sig in three separate `ax.scatter` calls (instead of one call with a colors array) is what makes `ax.legend()` work without manual `Patch` wrangling — each call gets a `label=`, legend reads them off automatically.
+- **Annotate with `ax.annotate`, not `ax.text`.** `annotate` lets you set `xytext=` in offset points so labels don't overlap their dots regardless of axis scaling. `text` would need manual unit math.
+- **Clip on `adj_p_value`, not on `-log10`.** Tiny p-values (< 1e-300, possible from `ttest_ind` on ~50 samples) become `inf` after `-log10` and break `matplotlib`'s autoscale. Clip the input to `1e-300` before the log so the y-axis stays finite.
+- **`plt.close(fig)` after save.** Matches `eda.py`. Without it, repeated CLI runs leak figures.
+
+### Module header
+
+```python
+"""Volcano plot for differential-expression results.
+
+Renders log2FC (x) vs -log10(adj_p_value) (y) as a static PNG, classifying
+points as up-regulated, down-regulated, or non-significant against caller-
+supplied thresholds. Called by ge.py; not meant to be run directly.
+"""
+
+from __future__ import annotations
+import logging
+import os
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+logger = logging.getLogger(__name__)
+
+_DPI = 200
+_SAVEFIG_KW = {'dpi': _DPI, 'bbox_inches': 'tight'}
+_P_FLOOR = 1e-300       # clip for adj_p_value before -log10
+_POINT_SIZE = 8
+_POINT_ALPHA = 0.6
+_COLOR_NONSIG = '#bdbdbd'
+_COLOR_UP = '#d62728'
+_COLOR_DOWN = '#1f77b4'
+```
+
+No `_ROOT`/sys.path block needed — this module imports nothing from `shared_utils`. Plain seaborn isn't imported either; volcano is pure matplotlib, no statistical aesthetics needed.
+
+### Public entry function
 
 ```python
 def plot_volcano(
@@ -853,19 +895,176 @@ def plot_volcano(
     adj_p_max: float = 0.05,
     abs_log2fc_min: float = 1.0,
     annotate_top: int = 10,
-) -> None
+) -> None:
+    """Render volcano plot to output_path. Defaults: p<0.05, |log2FC|>=1, top-10 labels."""
 ```
 
-Implementation:
-- `x = de_results['log2FC']`, `y = -np.log10(de_results['adj_p_value'].clip(lower=1e-300))` (clip to avoid `-inf` for p≈0).
-- Classify each gene:
-  - grey: non-significant
-  - red: `adj_p_value < adj_p_max` and `log2FC > abs_log2fc_min` (up)
-  - blue: `adj_p_value < adj_p_max` and `log2FC < -abs_log2fc_min` (down)
-- `plt.scatter` with `s=8, alpha=0.6` per category (three calls so legend works).
-- Dashed threshold lines at `±abs_log2fc_min` (vertical) and `-log10(adj_p_max)` (horizontal).
-- Annotate top-N by `adj_p_value` with `gene_symbol` (fall back to `probe_id`) using `matplotlib.text` + a small offset.
-- `fig.savefig(output_path, dpi=200, bbox_inches='tight')`.
+Three thresholds are caller-tunable because they're judgment calls — `0.05` and `1.0` are conventional but a sparse dataset may want `0.1` and `0.585` (1.5× fold change), a noisy one `0.01` and `2.0`. Don't bake them in.
+
+### Step-by-step implementation
+
+1. **Validate input columns.** Catch the missing-column case here with a clear message — `KeyError: 'log2FC'` from a downstream pandas op is opaque about which step asked for it:
+
+   ```python
+   required = {'log2FC', 'adj_p_value'}
+   missing = required - set(de_results.columns)
+   if missing:
+       raise ValueError(
+           f"de_results missing columns: {sorted(missing)}. "
+           f"Expected output of shared_utils.differential_expression."
+       )
+   ```
+
+   Don't require `gene_symbol` — fall back to `probe_id` for labels, fall back to row index if neither exists.
+
+2. **Compute axes.** Drop rows with NaN p-values (genes that failed the t-test in `differential_expression`) — they have no defined position on the y-axis:
+
+   ```python
+   df = de_results.dropna(subset=['adj_p_value', 'log2FC']).copy()
+   x = df['log2FC'].to_numpy()
+   p_clipped = df['adj_p_value'].clip(lower=_P_FLOOR)
+   y = -np.log10(p_clipped.to_numpy())
+   ```
+
+   `.copy()` because we'll add a transient `_label` column for annotation; don't mutate the caller's frame.
+
+3. **Classify each row** into up / down / non-significant:
+
+   ```python
+   sig = df['adj_p_value'] < adj_p_max
+   is_up = sig & (df['log2FC'] >= abs_log2fc_min)
+   is_down = sig & (df['log2FC'] <= -abs_log2fc_min)
+   is_nonsig = ~(is_up | is_down)
+   ```
+
+   Using `>=` / `<=` (not strict `>` / `<`) so a gene exactly at the threshold counts as up/down, not non-sig. `is_nonsig` covers everything else, including significant-but-small-effect genes — they're in the "p passed but effect size too small" zone, conventionally drawn grey.
+
+4. **Build the figure.** Single axes, fixed aspect ratio (volcano plots are typically wider than tall):
+
+   ```python
+   fig, ax = plt.subplots(figsize=(8, 6))
+   ax.scatter(x[is_nonsig], y[is_nonsig], s=_POINT_SIZE, alpha=_POINT_ALPHA,
+              c=_COLOR_NONSIG, label='non-significant')
+   ax.scatter(x[is_up], y[is_up], s=_POINT_SIZE, alpha=_POINT_ALPHA,
+              c=_COLOR_UP, label=f'up (n={int(is_up.sum())})')
+   ax.scatter(x[is_down], y[is_down], s=_POINT_SIZE, alpha=_POINT_ALPHA,
+              c=_COLOR_DOWN, label=f'down (n={int(is_down.sum())})')
+   ```
+
+   Plot non-sig **first** so up/down dots end up on top — z-order matters, and the interesting dots being underneath the grey wash is the most common volcano-plot bug.
+
+5. **Threshold reference lines** — three dashed greys:
+
+   ```python
+   ax.axhline(-np.log10(adj_p_max), color='grey', linestyle='--', linewidth=0.8)
+   ax.axvline(abs_log2fc_min, color='grey', linestyle='--', linewidth=0.8)
+   ax.axvline(-abs_log2fc_min, color='grey', linestyle='--', linewidth=0.8)
+   ```
+
+   Three calls (not a loop) — total six lines and reads top-to-bottom.
+
+6. **Top-N annotation.** Pick the `annotate_top` rows with the smallest `adj_p_value` *among significant* genes and annotate each. Skip the step entirely if `annotate_top <= 0`:
+
+   ```python
+   if annotate_top > 0:
+       label_col = 'gene_symbol' if 'gene_symbol' in df.columns else 'probe_id'
+       sig_df = df[is_up | is_down].copy()
+       sig_df['_y'] = -np.log10(sig_df['adj_p_value'].clip(lower=_P_FLOOR))
+       top = sig_df.nsmallest(annotate_top, 'adj_p_value')
+       for _, row in top.iterrows():
+           label = row.get(label_col)
+           if pd.isna(label) or label == '':
+               label = row.get('probe_id', '')
+           ax.annotate(
+               str(label),
+               xy=(row['log2FC'], row['_y']),
+               xytext=(4, 4), textcoords='offset points',
+               fontsize=7,
+           )
+   ```
+
+   `nsmallest` is the right tool — `sort_values().head(N)` works but is `O(n log n)` for what should be an `O(n)` selection. The empty-label fallback (`pd.isna(label) or label == ''`) handles annotation rows where `gene_symbol` exists as a column but is missing for that probe.
+
+7. **Axis labels, title, legend, save:**
+
+   ```python
+   ax.set_xlabel('log2 fold change (group_a − group_b)')
+   ax.set_ylabel('−log10(adj p-value)')
+   ax.set_title(
+       f'Volcano: {int(is_up.sum())} up, {int(is_down.sum())} down '
+       f'(p<{adj_p_max}, |log2FC|>={abs_log2fc_min})'
+   )
+   ax.legend(loc='upper right', fontsize=8)
+   os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+   fig.savefig(output_path, **_SAVEFIG_KW)
+   plt.close(fig)
+   logger.info("wrote %s (up=%d, down=%d, n=%d)",
+               output_path, int(is_up.sum()), int(is_down.sum()), len(df))
+   ```
+
+   `os.path.dirname(output_path) or '.'` covers both `/abs/path/volcano.png` and bare `volcano.png` — `dirname` of the latter is `''`, which `os.makedirs` rejects.
+
+### Edge cases to be aware of
+
+- **All NaN p-values** → `df` is empty after step 2's `dropna`. Three empty scatters and an empty plot result. Acceptable: the file still exists and the next step in the pipeline doesn't crash. Log a warning if `len(df) == 0` so the user notices.
+- **No significant genes at the chosen thresholds** → `is_up.sum() == 0`, `is_down.sum() == 0`. Plot is all grey, title says `0 up, 0 down`. The user will likely re-run with looser thresholds — that's the right loop, don't auto-relax.
+- **`adj_p_value` of exactly 0.0** → some statsmodels versions emit `0.0` for tiny p-values. `clip(lower=_P_FLOOR)` covers this.
+- **Duplicate `gene_symbol`** in annotation candidates → multiple top probes for the same gene get labeled separately. Acceptable for v1; collapse-to-gene happens in `diffex.run_diffex(collapse_to_gene=True)` upstream if the user wants one label per gene.
+- **`log2FC` is `±inf`** (zero variance in one group, mean of one group is zero) → matplotlib's autoscale silently expands to fit. Filter these out earlier in `differential_expression` if it becomes a real problem; not worth defending here.
+
+### `ge.py` integration
+
+The handler `_cmd_volcano` in [ge.py](ge.py) loads `de.csv` and calls `plot_volcano`:
+
+```python
+def _cmd_volcano(args: argparse.Namespace) -> None:
+    de = pd.read_csv(_de_csv_path(args.accession, args.from_results))
+    out_png = os.path.join(_accession_dir(args.accession), 'volcano.png')
+    volcano.plot_volcano(
+        de, out_png,
+        adj_p_max=args.adj_p_max,
+        abs_log2fc_min=args.abs_log2fc_min,
+        annotate_top=args.annotate_top,
+    )
+```
+
+The `all` handler passes the in-memory `de` frame returned by `run_diffex` — no CSV round-trip.
+
+The argparse block for the `volcano` subcommand needs to be added to `_build_parser()` (mirror the `diffex` block already there):
+
+```python
+volc_p = sub.add_parser('volcano', help='render volcano plot from a de.csv')
+volc_p.add_argument('--accession', required=True)
+volc_p.add_argument('--from-results', help='path to de.csv (default: result/<acc>/de.csv)')
+volc_p.add_argument('--adj-p-max', type=float, default=0.05)
+volc_p.add_argument('--abs-log2fc-min', type=float, default=1.0)
+volc_p.add_argument('--annotate-top', type=int, default=10)
+```
+
+### Verification
+
+Extend [test.py](test.py) with:
+
+```python
+import logging, os
+import pandas as pd
+from src import volcano
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+de = pd.read_csv(os.path.join('result', 'GSE19804', 'de.csv'))
+out_png = os.path.join('result', 'GSE19804', 'volcano.png')
+volcano.plot_volcano(de, out_png)
+print('volcano exists:', os.path.exists(out_png))
+```
+
+Expected for GSE19804 (lung cancer tumor vs normal, ~54k probes):
+
+1. Log line `wrote result/GSE19804/volcano.png (up=~3000, down=~2000, n=54675)` — exact counts depend on filtering but tumor vs normal lung shows thousands of significant genes either side.
+2. Open `volcano.png` — characteristic volcano shape: dense grey cloud at the bottom, two clear "wings" of red (upper right) and blue (upper left), tapering upward to a few hundred high-confidence genes.
+3. Annotated labels include `SPP1`, `MMP1`, `MMP12`, `WIF1`, `AGER` — known lung-cancer markers near the top of the y-axis.
+4. Three dashed reference lines visible: one horizontal at y=−log10(0.05)≈1.3, two vertical at x=±1.
+5. Re-run with `annotate_top=0`: same plot, no labels — confirms the annotation block is opt-out cleanly.
+6. Re-run with `adj_p_max=0.01, abs_log2fc_min=2.0`: fewer red/blue dots, title reflects new thresholds, threshold lines move accordingly.
 
 ## `src/heatmap.py` — clustered heatmap
 
