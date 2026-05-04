@@ -78,7 +78,7 @@ def plot_volcano(
             ax.annotate(
                 str(label),
                 xy=(row['log2FC'],row['_y']),
-                xytest=(4,4),
+                xytext=(4,4),
                 textcoords='offset points',
                 fontsize=7,
             )

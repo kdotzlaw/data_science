@@ -22,11 +22,12 @@ print('outputs:', sorted(os.listdir(out)))
 '''
 
 # test diffex
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+'''logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 out = os.path.join('result', 'GSE19804')
 de = diffex.run_diffex(exp, samp, ann, 'tumor', 'normal', output_dir=out)
 print('shape:', de.shape, 'cols:', list(de.columns))
 print('csv exists:', os.path.exists(os.path.join(out, 'de.csv')))
+'''
 
 # test volcano
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
