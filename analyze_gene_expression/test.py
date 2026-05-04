@@ -1,7 +1,8 @@
 import shared_utils as su
 import logging, os
 import pandas as pd
-from src import eda, diffex, volcano
+from shared_utils import load_geo_dataset, assign_groups
+from src import eda, diffex, volcano, heatmap
 
 
 # test shared_utils
@@ -30,8 +31,22 @@ print('csv exists:', os.path.exists(os.path.join(out, 'de.csv')))
 '''
 
 # test volcano
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+'''logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 de = pd.read_csv(os.path.join('result', 'GSE19804', 'de.csv'))
 out_png = os.path.join('result', 'GSE19804', 'volcano.png')
 volcano.plot_volcano(de, out_png)
 print('volcano exists:', os.path.exists(out_png))
+'''
+
+# test heatmap
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+expression, samples, annotation = load_geo_dataset('GSE19804', cache_dir='data')
+samples = assign_groups(
+    samples,
+    source_col='characteristics_ch1',
+    substrings={'tumor': 'tumor', 'normal': 'normal'},
+)
+de = pd.read_csv(os.path.join('result', 'GSE19804', 'de.csv'))
+out_png = os.path.join('result', 'GSE19804', 'heatmap.png')
+heatmap.plot_heatmap(expression, samples, de, out_png, top=50)
+print('heatmap exists:', os.path.exists(out_png))

@@ -79,6 +79,17 @@ def _build_parser() -> argparse.ArgumentParser:
     volc_p.add_argument('--abs-log2fc-min', type=float, default=1.0)
     volc_p.add_argument('--annotate-top', type=int, default=10)
 
+   # ----- heatmap -----
+    hm_p = sub.add_parser('heatmap', help='render clustered heatmap of top DE genes')
+    hm_p.add_argument('--accession', required=True)
+    hm_p.add_argument('--group-col', required=True)
+    hm_p.add_argument('--group-a', required=True)
+    hm_p.add_argument('--group-b', required=True)
+    hm_p.add_argument('--from-results', help='path to de.csv (default: result/<acc>/de.csv)')
+    hm_p.add_argument('--top', type=int, default=50)
+    hm_p.add_argument('--adj-p-max', type=float, default=0.05)
+    hm_p.add_argument('--abs-log2fc-min', type=float, default=1.0)
+
     # ---- all ----
     all_p = sub.add_parser('all', help='run eda -> diffex -> volcano -> heatmap end-to-end')
     all_p.add_argument('--accession', required=True)
@@ -135,6 +146,21 @@ def _cmd_volcano(args: argparse.Namespace) -> None:
         annotate_top=args.annotate_top,
     )
 
+def _cmd_heatmap(args: argparse.Namespace) -> None:
+    expression, samples, annotation = su.load_geo_dataset(args.accession, cache_dir=_data_dir(),)
+    samples = su.assign_groups(
+        samples,
+        source_col=args.group_col,
+        substrings={args.group_a: args.group_a, args.group_b: args.group_b},
+    )
+    de = pd.read_csv(_de_csv_path(args.accession, args.from_results))
+    out_png = os.path.join(_accession_dir(args.accession),'heatmap.png')
+    heatmap.plot_heatmap(
+        expression, samples, de, out_png,
+        top = args.top,
+        adj_p_max=args.adj_p_max,
+        abs_log2fc_min=args.abs_log2fc_min,
+    )
 
 def main(argv: list[str] | None=None) -> None:
     parser = _build_parser()

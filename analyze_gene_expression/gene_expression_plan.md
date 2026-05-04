@@ -1068,7 +1068,56 @@ Expected for GSE19804 (lung cancer tumor vs normal, ~54k probes):
 
 ## `src/heatmap.py` — clustered heatmap
 
-Inputs: `expression` (normalized), `samples`, `de_results`, output path.
+Inputs: `expression` (already log-scaled, **not** z-scored — z-scoring happens here per row), `samples` with a `group` column, `de_results` (output of `differential_expression`), output path. One PNG output. Sibling module to [src/eda.py](src/eda.py), [src/diffex.py](src/diffex.py), and [src/volcano.py](src/volcano.py); follows the same callable-entry, logger, no-try/except conventions.
+
+### Design decisions
+
+- **DataFrame in, path out.** `plot_heatmap(expression, samples, de_results, output_path, ...)` — caller loads inputs and computes the path. Mirrors [src/volcano.py](src/volcano.py); keeps `heatmap.py` ignorant of the `result/<accession>/...` scheme and lets the `all` orchestrator pass in-memory frames without a CSV/parquet round-trip.
+- **`sns.clustermap`, not `sns.heatmap`.** `clustermap` runs hierarchical clustering on rows and columns and draws both dendrograms in one call. Doing it manually with `scipy.cluster.hierarchy` plus `sns.heatmap` is ~30 lines of axis-juggling for the same picture.
+- **Z-score rows, not columns.** Each row (gene) is centered and scaled independently so the colormap shows *relative* expression across samples. Without row z-scoring, a single high-magnitude probe washes out everything else into a single shade. Done via `shared_utils.normalize(mat, 'zscore')` so the rule (mean/std along axis=1, std==0 rows go NaN and get dropped) lives in one place — see [shared_utils.py](shared_utils.py)'s `normalize` notes.
+- **Diverging colormap centered at 0.** `cmap='RdBu_r'`, `center=0` — after z-score, 0 is the row mean and the eye should read deviations symmetrically.
+- **Column color bar over column dendrogram.** `col_colors=` paints a thin strip above the heatmap mapping each sample to its group. Lets the reader visually verify "did samples cluster by group?" without staring at GSM IDs. Two-class `sns.color_palette('Set2', 2)` keeps tumor/normal visually distinct from the heatmap's red/blue scale.
+- **Drop unassigned samples explicitly here.** Not via `subset_by_group` — `samples` may already be group-labeled by the caller, but this module shouldn't crash if a NaN slipped through. `samples.dropna(subset=['group'])` is one line and self-documenting.
+- **Height scales with `top`.** A 50-gene heatmap fits in 9–10 inches; a 200-gene one needs more. `figsize=(10, max(6, top*0.18))` keeps row labels legible without an enormous default. The `max(6, ...)` floor stops tiny `top` values producing a squashed strip.
+- **`plt.close(g.fig)` after save.** Same leak-prevention rule as `eda.py` and `volcano.py`. `clustermap` returns a `ClusterGrid`, not a `Figure` — close `g.fig` explicitly.
+
+### Module header
+
+```python
+"""Clustered heatmap of top differentially expressed genes.
+
+Renders a sample × gene heatmap with hierarchical clustering on both axes
+and a per-sample group color bar. Called by ge.py; not meant to be run
+directly. Caller is expected to have already invoked load_geo_dataset,
+assign_groups, and run_diffex.
+"""
+
+from __future__ import annotations
+import logging
+import os
+import sys
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from shared_utils import top_de_genes, normalize
+
+logger = logging.getLogger(__name__)
+
+_DPI = 200
+_SAVEFIG_KW = {'dpi': _DPI, 'bbox_inches': 'tight'}
+_GROUP_PALETTE = 'Set2'
+_CMAP = 'RdBu_r'
+```
+
+The `_ROOT`/`sys.path` block matches `eda.py` — `heatmap.py` is the only plot module that pulls from `shared_utils` (`top_de_genes` for gene selection, `normalize` for row z-scoring). `volcano.py` doesn't because it operates on the already-computed `de_results` frame.
+
+### Public entry function
 
 ```python
 def plot_heatmap(
@@ -1077,18 +1126,257 @@ def plot_heatmap(
     de_results: pd.DataFrame,
     output_path: str,
     top: int = 50,
-) -> None
+    adj_p_max: float = 0.05,
+    abs_log2fc_min: float = 1.0,
+) -> None:
+    """Render clustered heatmap of top DE genes to output_path.
+    Defaults: top 50 genes meeting p<0.05 and |log2FC|>=1."""
 ```
 
-Implementation:
-- `top_genes = shared_utils.top_de_genes(de_results, n=top)` — pick the gene set.
-- `mat = expression.loc[top_genes['probe_id']]` — subset rows.
-- Keep only samples with an assigned group: `mat = mat[samples.dropna(subset=['group']).index]`.
-- z-score rows via `shared_utils.normalize(mat, 'zscore')` — standard heatmap convention so colors show relative expression.
-- Column color bar: map `samples['group']` to two colors via `sns.color_palette('Set2', 2)`; build a `pd.Series` indexed by column.
-- Relabel row index to `gene_symbol` if available (fall back to probe).
-- `sns.clustermap(mat_z, cmap='RdBu_r', center=0, col_colors=col_colors, figsize=(10, max(6, top*0.18)), xticklabels=True, yticklabels=True)` — clustermap runs the hierarchical clustering for both axes automatically.
-- `g.savefig(output_path, dpi=200, bbox_inches='tight')`.
+`adj_p_max` and `abs_log2fc_min` are forwarded to `top_de_genes` so the caller can loosen them if `top_de_genes` returns fewer rows than requested. Same defaults as `volcano.py` so both plots agree on what counts as "significant" by default.
+
+### Step-by-step implementation
+
+1. **Validate input columns.** Same defensive check as `volcano.py` — fail fast with a clear message rather than letting a downstream `KeyError` surface:
+
+   ```python
+   required_de = {'log2FC', 'adj_p_value', 'probe_id'}
+   missing = required_de - set(de_results.columns)
+   if missing:
+       raise ValueError(
+           f"de_results missing columns: {sorted(missing)}. "
+           f"Expected output of shared_utils.differential_expression."
+       )
+   if 'group' not in samples.columns:
+       raise ValueError(
+           "samples missing 'group' column. "
+           "Call shared_utils.assign_groups before plot_heatmap."
+       )
+   ```
+
+   `gene_symbol` is *not* required — fall back to `probe_id` for row labels.
+
+2. **Pick the gene set:**
+
+   ```python
+   top_genes = top_de_genes(
+       de_results, n=top,
+       adj_p_max=adj_p_max, abs_log2fc_min=abs_log2fc_min,
+   )
+   if top_genes.empty:
+       logger.warning(
+           "no genes pass thresholds (p<%s, |log2FC|>=%s); skipping heatmap",
+           adj_p_max, abs_log2fc_min,
+       )
+       return
+   ```
+
+   Empty-set early return rather than writing a blank PNG — lets the `all` pipeline continue without crashing the next step, and the warning tells the user which knob to loosen. Don't auto-relax the thresholds.
+
+3. **Subset rows (genes) and columns (samples).** Drop unassigned samples and re-align columns:
+
+   ```python
+   labeled = samples.dropna(subset=['group'])
+   if labeled.empty:
+       raise ValueError("no samples have an assigned group")
+   probe_ids = top_genes['probe_id'].tolist()
+   mat = expression.loc[probe_ids, labeled.index]
+   ```
+
+   `expression.loc[probe_ids, labeled.index]` does row + column subset in one indexing call. If a `probe_id` from `top_genes` is missing in `expression` (shouldn't happen — `de_results` was built from the same matrix — but possible if the caller passes a sliced `expression`), `.loc` raises `KeyError` immediately, which is the right failure.
+
+4. **Drop zero-variance rows before z-scoring.** A row that's constant across the kept samples gives `std == 0` → division by zero → NaN row → `clustermap` crashes during the linkage step. Filter first:
+
+   ```python
+   row_std = mat.std(axis=1)
+   keep = row_std > 0
+   if not keep.all():
+       dropped = (~keep).sum()
+       logger.warning("dropping %d zero-variance rows before z-score", dropped)
+       mat = mat.loc[keep]
+   ```
+
+   This is rare in practice — top DE genes by definition have variation — but the failure mode is a `LinAlgError` deep in scipy that's painful to debug.
+
+5. **Z-score per row** via the shared helper:
+
+   ```python
+   mat_z = normalize(mat, 'zscore')
+   ```
+
+   `shared_utils.normalize` z-scores along `axis=1` (per row) and returns a copy with the same index/columns. Don't re-implement here — keeps the row-vs-column convention in one place.
+
+6. **Build the column color bar.** Map each sample's `group` value to a color, returned as a `Series` indexed by sample so `clustermap` aligns it with columns:
+
+   ```python
+   groups = labeled.loc[mat_z.columns, 'group']
+   group_levels = sorted(groups.unique())
+   palette = sns.color_palette(_GROUP_PALETTE, len(group_levels))
+   group_to_color = dict(zip(group_levels, palette))
+   col_colors = groups.map(group_to_color)
+   col_colors.name = 'group'
+   ```
+
+   `sorted(groups.unique())` makes the color assignment deterministic — same group → same color across runs, which matters when comparing PNGs by eye between threshold experiments. `col_colors.name = 'group'` labels the strip in the rendered figure.
+
+7. **Relabel rows to gene symbol where available.** Probe IDs (`'1554567_a_at'`) are unreadable; gene symbols (`'SPP1'`) are what the reader actually wants:
+
+   ```python
+   if 'gene_symbol' in top_genes.columns:
+       label_map = top_genes.set_index('probe_id')['gene_symbol']
+       new_index = [
+           label_map.get(p) if isinstance(label_map.get(p), str)
+                            and label_map.get(p) != ''
+           else p
+           for p in mat_z.index
+       ]
+       mat_z = mat_z.copy()
+       mat_z.index = new_index
+   ```
+
+   Per-row fallback (not "all-or-nothing") because annotation tables routinely have `gene_symbol` for most probes and missing values for a few — a probe with no symbol still deserves a label (its probe ID).
+
+8. **Clustermap call:**
+
+   ```python
+   height = max(6.0, min(20.0, top * 0.18))
+   g = sns.clustermap(
+       mat_z,
+       cmap=_CMAP,
+       center=0,
+       col_colors=col_colors,
+       figsize=(10, height),
+       xticklabels=True,
+       yticklabels=True,
+       dendrogram_ratio=(0.12, 0.18),
+       cbar_pos=(0.02, 0.85, 0.03, 0.1),
+       linewidths=0,
+   )
+   ```
+
+   - `min(20.0, ...)` caps the height so a `top=200` run doesn't produce a 36-inch figure that matplotlib rejects.
+   - `dendrogram_ratio=(0.12, 0.18)` shrinks both dendrograms slightly — the default eats too much canvas.
+   - `cbar_pos` puts the colorbar in the top-left, out of the way; the default position overlaps the column dendrogram on tall figures.
+   - `linewidths=0` because cell borders are visual noise at 50+ rows.
+
+9. **Tweak tick labels and title:**
+
+   ```python
+   g.ax_heatmap.set_xticklabels(
+       g.ax_heatmap.get_xticklabels(), rotation=90, fontsize=6,
+   )
+   g.ax_heatmap.set_yticklabels(
+       g.ax_heatmap.get_yticklabels(), rotation=0, fontsize=7,
+   )
+   g.ax_heatmap.set_xlabel('sample')
+   g.ax_heatmap.set_ylabel('gene')
+   g.fig.suptitle(
+       f'Top {len(mat_z)} DE genes (z-scored rows) — '
+       f'{len(group_levels)} groups',
+       y=1.02, fontsize=10,
+   )
+   ```
+
+   Rotated, tiny xticks because GSM IDs are long and there are many of them; small but readable yticks for gene symbols. `y=1.02` lifts the title above the column dendrogram.
+
+10. **Save and close:**
+
+    ```python
+    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+    g.savefig(output_path, **_SAVEFIG_KW)
+    plt.close(g.fig)
+    logger.info(
+        "wrote %s (genes=%d, samples=%d, groups=%d)",
+        output_path, mat_z.shape[0], mat_z.shape[1], len(group_levels),
+    )
+    ```
+
+    `os.path.dirname(output_path) or '.'` covers the bare-filename case, same as `volcano.py`. `plt.close(g.fig)` — `ClusterGrid` doesn't have its own close method.
+
+### Edge cases to be aware of
+
+- **Empty `top_genes`** → handled in step 2, log + return. The PNG is *not* created; the calling pipeline tolerates this.
+- **Single group in `samples`** → `len(group_levels) == 1`, color bar is a single uniform stripe (still informative as a "labeled" indicator). Clustermap still runs — sample dendrogram just clusters by expression similarity within the one group.
+- **All probes have NaN `gene_symbol`** → fallback in step 7 keeps probe IDs as labels; figure renders fine, just less readable.
+- **`top` larger than the number of significant genes** → `top_de_genes` returns whatever clears the thresholds; `mat_z` has fewer rows than requested; figure height shrinks to the `max(6, ...)` floor.
+- **NaNs in `expression`** for some probe × sample cells → propagates through z-score; `clustermap` will refuse to compute linkage on NaN rows. If this surfaces in real data, fill within `differential_expression` upstream rather than papering over it here.
+- **Duplicate `gene_symbol`** across the top set (e.g. two probes for `MMP1`) → both rows keep their symbol label; the heatmap shows two `MMP1` rows. Fine for v1; collapse-to-gene happens in `diffex.run_diffex(collapse_to_gene=True)` if the user wants one row per gene.
+- **`expression` indexed by gene symbol, not probe ID** (caller passed a collapsed frame plus an uncollapsed `de_results`) → `expression.loc[probe_ids, ...]` raises `KeyError` in step 3. The error message names the missing probes, which is enough to diagnose.
+
+### `ge.py` integration
+
+The handler `_cmd_heatmap` in [ge.py](ge.py) loads everything `plot_heatmap` needs and calls it:
+
+```python
+def _cmd_heatmap(args: argparse.Namespace) -> None:
+    expression, samples, annotation = shared_utils.load_geo_dataset(
+        args.accession, cache_dir=_data_dir(),
+    )
+    samples = shared_utils.assign_groups(
+        samples,
+        source_col=args.group_col,
+        substrings={args.group_a: args.group_a, args.group_b: args.group_b},
+    )
+    de = pd.read_csv(_de_csv_path(args.accession, args.from_results))
+    out_png = os.path.join(_accession_dir(args.accession), 'heatmap.png')
+    heatmap.plot_heatmap(
+        expression, samples, de, out_png,
+        top=args.top,
+        adj_p_max=args.adj_p_max,
+        abs_log2fc_min=args.abs_log2fc_min,
+    )
+```
+
+The `all` handler passes the in-memory `expression`, `samples` (already group-assigned), and `de` returned by `run_diffex` — no GEO reload, no CSV round-trip.
+
+The argparse block for the `heatmap` subcommand mirrors `volcano`'s:
+
+```python
+hm_p = sub.add_parser('heatmap', help='render clustered heatmap of top DE genes')
+hm_p.add_argument('--accession', required=True)
+hm_p.add_argument('--group-col', required=True)
+hm_p.add_argument('--group-a', required=True)
+hm_p.add_argument('--group-b', required=True)
+hm_p.add_argument('--from-results', help='path to de.csv (default: result/<acc>/de.csv)')
+hm_p.add_argument('--top', type=int, default=50)
+hm_p.add_argument('--adj-p-max', type=float, default=0.05)
+hm_p.add_argument('--abs-log2fc-min', type=float, default=1.0)
+```
+
+`--group-col`/`--group-a`/`--group-b` are required here (unlike `volcano`, which only needs the precomputed `de.csv`) because `heatmap` needs the sample-to-group mapping to draw `col_colors`.
+
+### Verification
+
+Extend [test.py](test.py) with:
+
+```python
+import logging, os
+import pandas as pd
+from src import heatmap
+from shared_utils import load_geo_dataset, assign_groups
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+expression, samples, annotation = load_geo_dataset('GSE19804', cache_dir='data')
+samples = assign_groups(
+    samples,
+    source_col='characteristics_ch1',
+    substrings={'tumor': 'tumor', 'normal': 'normal'},
+)
+de = pd.read_csv(os.path.join('result', 'GSE19804', 'de.csv'))
+out_png = os.path.join('result', 'GSE19804', 'heatmap.png')
+heatmap.plot_heatmap(expression, samples, de, out_png, top=50)
+print('heatmap exists:', os.path.exists(out_png))
+```
+
+Expected for GSE19804 (lung cancer tumor vs normal, ~120 samples):
+
+1. Log line `wrote result/GSE19804/heatmap.png (genes=50, samples=~118, groups=2)` — sample count slightly under 120 if a couple of GSMs failed substring matching.
+2. Open `heatmap.png` — column dendrogram splits cleanly into two large clades; the column color strip above the heatmap shows that split aligns with tumor/normal (i.e. the dendrogram is *not* interleaving groups).
+3. Row dendrogram shows two main blocks — up-regulated genes (red across tumor samples, blue across normal) and down-regulated genes (the inverse pattern).
+4. Visible row labels include `SPP1`, `MMP1`, `MMP12`, `WIF1`, `AGER` — same lung-cancer markers that `volcano.png` annotates, sanity-checking that both plots are reading the same `de_results`.
+5. Re-run with `top=200`: figure is taller, individual row labels become harder to read but the two-block structure persists. Confirms the `top` parameter scales correctly.
+6. Re-run with `adj_p_max=1.0, abs_log2fc_min=0.0`: thresholds are effectively disabled, `top_de_genes` ranks purely by `|log2FC|`, heatmap still renders and the strongest genes still drive the clustering.
+7. Re-run after artificially blanking the `group` column on one sample: that sample is dropped (visible by sample count in log line), the rest of the figure is unchanged.
 
 ## `src/compare.py` — cross-dataset comparison
 
