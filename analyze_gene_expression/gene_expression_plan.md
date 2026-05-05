@@ -1740,12 +1740,7 @@ cmp_p.add_argument('--adj-p-max', type=float, default=0.05)
 cmp_p.add_argument('--abs-log2fc-min', type=float, default=1.0)
 ```
 
-`--group-col` / `--group-a` / `--group-b` are reused for both datasets, which is wrong for the recommended GSE19804/GSE10072 pairing: GSE19804's `source_name_ch1` says `"... tumor ..."` while GSE10072's says `"Adenocarcinoma of the Lung"`. Same biology, different wording. Two ways out:
-
-1. **Per-dataset substrings (preferred).** Add `--tumor-substring-a` / `--tumor-substring-b` (and similar for normal) so the user can map each dataset's wording onto a shared `group` label. Both datasets still get assigned `group='tumor'` / `group='normal'` so `run_compare`'s join works unchanged.
-2. **Document and skip the CLI for cross-cohort runs.** Tell the user to drop into Python and call `run_compare` directly with two pre-collapsed `de_results` frames built using whatever per-dataset substrings each one needs (this is what the verification snippet below does).
-
-Pick (1) for v1 if `compare` is a first-class subcommand; otherwise document (2) in [readme.md](readme.md).
+`--group-col` is shared across both datasets, but the substrings used to identify each group can differ — GSE19804's `source_name_ch1` says `"... tumor ..."` while GSE10072's says `"Adenocarcinoma of the Lung"`. To handle that, the CLI accepts four optional override flags: `--group-a-substring-a`, `--group-a-substring-b`, `--group-b-substring-a`, `--group-b-substring-b`. Each defaults to its corresponding `--group-a` / `--group-b` value, so users with consistent wording across cohorts don't need to set anything. Both datasets still get assigned `group='tumor'` / `group='normal'` (or whatever labels are passed) so `run_compare`'s join works unchanged. Example for the GSE19804/GSE10072 pair: `--group-a tumor --group-b normal --group-a-substring-b adenocarcinoma`.
 
 ### Verification
 
@@ -1856,9 +1851,9 @@ After implementation, verify end-to-end against a real GEO series:
    - Writes `de.csv`. Spot-check: well-known lung cancer markers (e.g. `SPP1`, `MMP1`) should appear near the top.
 4. `python analyze_gene_expression/ge.py volcano --accession GSE19804 --from-results result/GSE19804/de.csv`
    - Open `volcano.png` — should show the characteristic volcano shape with red/blue wings.
-5. `python analyze_gene_expression/ge.py heatmap --accession GSE19804 --from-results result/GSE19804/de.csv --top 50`
+5. `python analyze_gene_expression/ge.py heatmap --accession GSE19804 --group-col source_name_ch1 --group-a tumor --group-b normal --from-results result/GSE19804/de.csv --top 50`
    - Open `heatmap.png` — dendrogram should cluster tumor samples away from normal samples.
-6. `python analyze_gene_expression/ge.py compare --accession-a GSE19804 --accession-b GSE10072 --group-a tumor --group-b normal`
+6. `python analyze_gene_expression/ge.py compare --accession-a GSE19804 --accession-b GSE10072 --group-col source_name_ch1 --group-a tumor --group-b normal --group-a-substring-b adenocarcinoma`
    - `log2fc_scatter.png` should show positive Pearson r — the same biology across cohorts.
 7. Re-run step 2 — should hit the GEOparse cache and finish in seconds (no re-download).
 

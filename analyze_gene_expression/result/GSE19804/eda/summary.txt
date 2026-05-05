@@ -4,4 +4,4 @@ Value range: [3.043,14.890]
 Global median: 6.028
 Detected log-scale: True
 Per-sample NaN fraction: min=0.0000, median=0.0000, max=0.0000
-Group counts: {'tumor': 60, 'normal': 60}
+Group counts: <not assigned>

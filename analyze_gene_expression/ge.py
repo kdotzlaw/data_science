@@ -22,16 +22,6 @@ logger = logging.getLogger('ge')
 
 _RESULT_ROOT = 'result'
 
-# dispatch table
-_HANDLERS = {
-    'eda': _cmd_eda,
-    'diffex': _cmd_diffex,
-    'volcano': _cmd_volcano,
-    'heatmap': _cmd_heatmap,
-    'compare': _cmd_compare,
-    'all': _cmd_all,
-}
-
 # Configure logger
 def _configure_logging(verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO
@@ -96,8 +86,18 @@ def _build_parser() -> argparse.ArgumentParser:
     cmp_p.add_argument('--accession-b', required=True)
     cmp_p.add_argument('--group-col', required=True,
                     help='metadata column used for both datasets')
-    cmp_p.add_argument('--group-a', required=True)
-    cmp_p.add_argument('--group-b', required=True)
+    cmp_p.add_argument('--group-a', required=True,
+                    help='shared label for group A; also default substring in both datasets')
+    cmp_p.add_argument('--group-b', required=True,
+                    help='shared label for group B; also default substring in both datasets')
+    cmp_p.add_argument('--group-a-substring-a',
+                    help="substring matching group_a in accession_a's metadata (default: --group-a)")
+    cmp_p.add_argument('--group-a-substring-b',
+                    help="substring matching group_a in accession_b's metadata (default: --group-a)")
+    cmp_p.add_argument('--group-b-substring-a',
+                    help="substring matching group_b in accession_a's metadata (default: --group-b)")
+    cmp_p.add_argument('--group-b-substring-b',
+                    help="substring matching group_b in accession_b's metadata (default: --group-b)")
     cmp_p.add_argument('--adj-p-max', type=float, default=0.05)
     cmp_p.add_argument('--abs-log2fc-min', type=float, default=1.0)
    
@@ -158,11 +158,8 @@ def _cmd_volcano(args: argparse.Namespace) -> None:
     )
 
 def _cmd_heatmap(args: argparse.Namespace) -> None:
-    expression, samples, annotation = su.load_geo_dataset(args.accession, cache_dir=_data_dir(),)
-    samples = su.assign_groups(
-        samples,
-        source_col=args.group_col,
-        substrings={args.group_a: args.group_a, args.group_b: args.group_b},
+    expression, samples, _ = _load_and_group(
+        args.accession, args.group_col, args.group_a, args.group_b
     )
     de = pd.read_csv(_de_csv_path(args.accession, args.from_results))
     out_png = os.path.join(_accession_dir(args.accession),'heatmap.png')
@@ -174,13 +171,22 @@ def _cmd_heatmap(args: argparse.Namespace) -> None:
     )
 
 def _cmd_compare(args: argparse.Namespace) -> None:
-    de_a = _diffex_for(args.accession_a, args)
-    de_b = _diffex_for(args.accession_b,args)
+    de_a = _diffex_for(
+        args.accession_a, args,
+        substring_a=args.group_a_substring_a or args.group_a,
+        substring_b=args.group_b_substring_a or args.group_b,
+    )
+    de_b = _diffex_for(
+        args.accession_b, args,
+        substring_a=args.group_a_substring_b or args.group_a,
+        substring_b=args.group_b_substring_b or args.group_b,
+    )
 
     out_dir = os.path.join(
-        _result_root(),
+        _RESULT_ROOT,
         f"compare_{args.accession_a}_vs_{args.accession_b}",
     )
+    os.makedirs(out_dir, exist_ok=True)
     compare.run_compare(
         de_a, de_b, out_dir,
         label_a=args.accession_a, label_b=args.accession_b,
@@ -189,12 +195,17 @@ def _cmd_compare(args: argparse.Namespace) -> None:
     )
 
 # helper for compare
-def _diffex_for(accession: str, args: argparse.Namespace) -> pd.DataFrame:
-    expression, samples, annotation = su.load_geo_dataset(accession, cache_dir=_data_dir())
+def _diffex_for(
+    accession: str,
+    args: argparse.Namespace,
+    substring_a: str,
+    substring_b: str,
+) -> pd.DataFrame:
+    expression, samples, annotation = su.load_geo_dataset(accession)
     samples = su.assign_groups(
-        samples, 
+        samples,
         source_col=args.group_col,
-        substrings={args.group_a:args.group_a, args.group_b: args.group_b},
+        substrings={args.group_a: substring_a, args.group_b: substring_b},
     )
     return diffex.run_diffex(
         expression, samples, annotation,
@@ -204,6 +215,15 @@ def _diffex_for(accession: str, args: argparse.Namespace) -> pd.DataFrame:
         print_head=False,
     )
 
+
+# dispatch table
+_HANDLERS = {
+    'eda': _cmd_eda,
+    'diffex': _cmd_diffex,
+    'volcano': _cmd_volcano,
+    'heatmap': _cmd_heatmap,
+    'compare': _cmd_compare,
+}
 
 def main(argv: list[str] | None=None) -> None:
     parser = _build_parser()
