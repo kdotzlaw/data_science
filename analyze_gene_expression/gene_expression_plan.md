@@ -320,7 +320,7 @@ Single entry point that calls the individual `src/` modules. Uses `argparse` wit
 
 ```
 python ge.py eda      --accession GSE19804
-python ge.py diffex   --accession GSE19804 --group-col 'characteristics_ch1' --group-a 'tumor' --group-b 'normal'
+python ge.py diffex   --accession GSE19804 --group-col 'source_name_ch1' --group-a 'tumor' --group-b 'normal'
 python ge.py volcano  --accession GSE19804 --from-results result/GSE19804/de.csv
 python ge.py heatmap  --accession GSE19804 --from-results result/GSE19804/de.csv --top 50
 python ge.py compare  --accession-a GSE19804 --accession-b GSE10072 --group-a tumor --group-b normal
@@ -1359,7 +1359,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(mess
 expression, samples, annotation = load_geo_dataset('GSE19804', cache_dir='data')
 samples = assign_groups(
     samples,
-    source_col='characteristics_ch1',
+    source_col='source_name_ch1',
     substrings={'tumor': 'tumor', 'normal': 'normal'},
 )
 de = pd.read_csv(os.path.join('result', 'GSE19804', 'de.csv'))
@@ -1380,15 +1380,417 @@ Expected for GSE19804 (lung cancer tumor vs normal, ~120 samples):
 
 ## `src/compare.py` — cross-dataset comparison
 
-Inputs: two GEO accessions, group labels per dataset, output directory.
+Inputs: two `de_results` DataFrames (already collapsed to one row per `gene_symbol`), labels for each dataset (e.g. accession strings), output directory. Three outputs: `shared_de_genes.csv`, `log2fc_scatter.png`, `overlap_summary.txt`. Sibling module to [src/diffex.py](src/diffex.py), [src/volcano.py](src/volcano.py), and [src/heatmap.py](src/heatmap.py); follows the same callable-entry, logger, no-try/except conventions.
 
-Steps:
-1. Load and diff-express each dataset independently (reuse `diffex.py`'s pipeline). This gives `de_a`, `de_b`.
-2. Join on `gene_symbol` (not probe ID — probes differ across platforms). Drop rows without a symbol on either side. If multiple probes map to the same symbol, keep the one with the smaller `adj_p_value` per dataset before joining.
-3. Outputs in `result/compare_<a>_vs_<b>/`:
-   - `shared_de_genes.csv` — genes significant (`adj_p_value < 0.05`) in both; columns `gene_symbol, log2FC_a, adj_p_a, log2FC_b, adj_p_b`.
-   - `log2fc_scatter.png` — scatter of `log2FC_a` vs `log2FC_b` over the joined set, colored by "significant in both / one / neither". Annotate top genes by combined rank. Include Pearson r and Spearman ρ on the title.
-   - `overlap_summary.txt` — counts: significant in A only, B only, both; Jaccard of the two significant sets; direction concordance (same sign among both-significant genes).
+### Design decisions
+
+- **DataFrames in, directory out.** `run_compare(de_a, de_b, output_dir, label_a, label_b, ...)` — caller is responsible for running `diffex.run_diffex(..., collapse_to_gene=True)` on each dataset and passing the frames in. Mirrors the rest of `src/`: the module is ignorant of GEO loading and the `result/...` directory scheme. Lets the CLI handler (`_cmd_compare`) own I/O and lets `compare.py` be pure analysis.
+- **Collapse-to-gene happens upstream, not here.** `run_diffex(collapse_to_gene=True)` already implements the "smallest p wins per gene_symbol" rule (see step 5 of `diffex.py`). Re-implementing it here would duplicate logic and risk drift. `compare.py` validates that its inputs are already collapsed (one row per `gene_symbol`, no NaN symbols) and raises if not — fail loud rather than silently produce a half-correct join.
+- **Inner join on `gene_symbol` for the scatter; outer for the set math.** The scatter plot needs both `log2FC` values, so it lives on the inner join. The Jaccard / "in A only" / "in B only" counts need the union, so the significance-set comparison uses each dataset's full collapsed list.
+- **Three output files, not one.** A CSV for downstream re-use, a PNG for visual inspection, a TXT for at-a-glance numbers. Mirrors the EDA module's "one summary text + plots" split — no single output is responsible for everything.
+- **Pearson `r` and Spearman `ρ` both in the scatter title.** Pearson reports linear concordance; Spearman reports rank concordance and is robust to a few extreme-fold-change outliers that one platform measures and the other doesn't. Quoting both lets the reader judge whether an apparently-low Pearson is driven by genuine disagreement or by a few outlier genes.
+- **Annotate by "combined rank", not raw `|log2FC|`.** A gene with huge `log2FC` in dataset A but `log2FC ≈ 0` in dataset B isn't interesting for a *comparison* — interesting genes are large in both. Combined rank = `rank(|log2FC_a|) + rank(|log2FC_b|)`, smallest sum wins.
+- **No try/except.** Same convention as the rest of `src/`. Let `pd.merge`'s key errors and `scipy.stats`'s NaN-input errors propagate.
+
+### Module header
+
+```python
+"""Cross-dataset comparison of differential-expression results.
+
+Compares two collapsed-to-gene de_results frames and writes three files
+to output_dir: shared_de_genes.csv, log2fc_scatter.png, overlap_summary.txt.
+Called by ge.py; not meant to be run directly. Caller is expected to have
+already invoked run_diffex(..., collapse_to_gene=True) on each dataset.
+"""
+
+from __future__ import annotations
+import logging
+import os
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.stats import pearsonr, spearmanr
+
+logger = logging.getLogger(__name__)
+
+_DPI = 200
+_SAVEFIG_KW = {'dpi': _DPI, 'bbox_inches': 'tight'}
+_DEFAULT_ADJ_P_MAX = 0.05
+_DEFAULT_ABS_LOG2FC_MIN = 1.0
+_ANNOTATE_TOP = 15
+
+_COLOR_BOTH = '#d62728'      # significant in both
+_COLOR_ONE = '#ff7f0e'       # significant in one
+_COLOR_NEITHER = '#bdbdbd'   # neither
+
+_SHARED_CSV_NAME = 'shared_de_genes.csv'
+_SCATTER_PNG_NAME = 'log2fc_scatter.png'
+_SUMMARY_TXT_NAME = 'overlap_summary.txt'
+```
+
+No `_ROOT`/`sys.path` block — `compare.py` doesn't import from `shared_utils`. All inputs are pre-computed frames.
+
+### Public entry function
+
+```python
+def run_compare(
+    de_a: pd.DataFrame,
+    de_b: pd.DataFrame,
+    output_dir: str,
+    label_a: str,
+    label_b: str,
+    *,
+    adj_p_max: float = _DEFAULT_ADJ_P_MAX,
+    abs_log2fc_min: float = _DEFAULT_ABS_LOG2FC_MIN,
+    annotate_top: int = _ANNOTATE_TOP,
+) -> pd.DataFrame:
+    """Compare two collapsed-to-gene de_results frames.
+
+    Writes three files to output_dir and returns the joined frame
+    (inner join on gene_symbol).
+    """
+```
+
+`label_a` / `label_b` (typically GEO accessions like `'GSE19804'`) become the column suffixes in the joined frame and the axis labels on the scatter. Returning the joined frame lets the `all` orchestrator (or a notebook caller) inspect the result without re-reading the CSV.
+
+### Step-by-step implementation
+
+1. **Validate input columns and collapse status.** Both frames must have the four columns `compare.py` actually uses, and must be collapsed to one row per gene_symbol — mismatched assumptions here produce bad joins:
+
+   ```python
+   required = {'gene_symbol', 'log2FC', 'adj_p_value'}
+   for name, df in (('de_a', de_a), ('de_b', de_b)):
+       missing = required - set(df.columns)
+       if missing:
+           raise ValueError(
+               f"{name} missing columns: {sorted(missing)}. "
+               f"Expected output of run_diffex(..., collapse_to_gene=True)."
+           )
+       if df['gene_symbol'].isna().any():
+           raise ValueError(
+               f"{name} contains NaN gene_symbol entries. "
+               f"Pass collapse_to_gene=True to run_diffex."
+           )
+       if df['gene_symbol'].duplicated().any():
+           dup_n = int(df['gene_symbol'].duplicated().sum())
+           raise ValueError(
+               f"{name} has {dup_n} duplicate gene_symbol rows. "
+               f"Pass collapse_to_gene=True to run_diffex."
+           )
+   ```
+
+   Three checks, three distinct error messages — saves a round of "wait, which assumption did I break?" debugging.
+
+2. **Inner join on `gene_symbol`** with explicit suffixes. Keep only the columns we actually use:
+
+   ```python
+   cols = ['gene_symbol', 'log2FC', 'adj_p_value']
+   joined = de_a[cols].merge(
+       de_b[cols], on='gene_symbol', how='inner',
+       suffixes=(f'_{label_a}', f'_{label_b}'),
+   )
+   logger.info(
+       "joined %d × %d genes -> %d shared on gene_symbol",
+       len(de_a), len(de_b), len(joined),
+   )
+   ```
+
+   Suffix with the label, not `_a`/`_b` — when the user opens the CSV in Excel, `log2FC_GSE19804` is self-documenting; `log2FC_a` requires checking the header against memory.
+
+3. **Drop rows with NaN in any of the four numeric columns** before computing correlation / sign concordance — `scipy.stats.pearsonr` raises on NaN inputs:
+
+   ```python
+   numeric_cols = [
+       f'log2FC_{label_a}', f'log2FC_{label_b}',
+       f'adj_p_value_{label_a}', f'adj_p_value_{label_b}',
+   ]
+   joined = joined.dropna(subset=numeric_cols).reset_index(drop=True)
+   if joined.empty:
+       raise ValueError(
+           "no genes survived inner join + NaN drop — "
+           "check that both inputs are collapsed and overlap on gene_symbol"
+       )
+   ```
+
+4. **Significance flags and the four-way classification.** Significant in both / A only / B only / neither — drives both the scatter coloring and the summary counts:
+
+   ```python
+   sig_a_full = (de_a['adj_p_value'] < adj_p_max) & (de_a['log2FC'].abs() >= abs_log2fc_min)
+   sig_b_full = (de_b['adj_p_value'] < adj_p_max) & (de_b['log2FC'].abs() >= abs_log2fc_min)
+   set_a = set(de_a.loc[sig_a_full, 'gene_symbol'])
+   set_b = set(de_b.loc[sig_b_full, 'gene_symbol'])
+
+   joined['sig_a'] = (
+       (joined[f'adj_p_value_{label_a}'] < adj_p_max)
+       & (joined[f'log2FC_{label_a}'].abs() >= abs_log2fc_min)
+   )
+   joined['sig_b'] = (
+       (joined[f'adj_p_value_{label_b}'] < adj_p_max)
+       & (joined[f'log2FC_{label_b}'].abs() >= abs_log2fc_min)
+   )
+   ```
+
+   `set_a` / `set_b` are computed from the **full** collapsed lists (not the inner-joined subset) so the Jaccard reflects genes-significant-in-A regardless of whether they appear in B's platform — that's the biologically honest count.
+
+5. **Write `shared_de_genes.csv`** — genes significant in both. Sorted by combined rank so the most concordant hits land at the top:
+
+   ```python
+   shared = joined[joined['sig_a'] & joined['sig_b']].copy()
+   shared['rank_a'] = shared[f'log2FC_{label_a}'].abs().rank(ascending=False)
+   shared['rank_b'] = shared[f'log2FC_{label_b}'].abs().rank(ascending=False)
+   shared['combined_rank'] = shared['rank_a'] + shared['rank_b']
+   shared = (
+       shared.sort_values('combined_rank')
+             .drop(columns=['rank_a', 'rank_b'])
+             .reset_index(drop=True)
+   )
+   os.makedirs(output_dir, exist_ok=True)
+   shared.to_csv(
+       os.path.join(output_dir, _SHARED_CSV_NAME),
+       index=False, float_format='%.6g',
+   )
+   logger.info("wrote %s (%d genes)", _SHARED_CSV_NAME, len(shared))
+   ```
+
+   `'%.6g'` matches the format used in `diffex.py`'s CSV emission — keeps tiny adjusted p-values readable.
+
+6. **Compute correlations on the joined set** (not just the both-significant subset — correlations are most meaningful over the full overlap):
+
+   ```python
+   x = joined[f'log2FC_{label_a}'].to_numpy()
+   y = joined[f'log2FC_{label_b}'].to_numpy()
+   pearson_r, _ = pearsonr(x, y)
+   spearman_rho, _ = spearmanr(x, y)
+   ```
+
+   Discard the p-values from `pearsonr` / `spearmanr` — with tens of thousands of genes the null is rejected at meaningless significance levels, so the correlation magnitude is what matters.
+
+7. **Build the scatter.** Three z-ordered scatter calls (same pattern as `volcano.py` step 4 — non-significant first so colored dots land on top):
+
+   ```python
+   fig, ax = plt.subplots(figsize=(7, 7))
+   neither = ~(joined['sig_a'] | joined['sig_b'])
+   one_only = (joined['sig_a'] ^ joined['sig_b'])
+   both = joined['sig_a'] & joined['sig_b']
+
+   ax.scatter(x[neither], y[neither], s=6, alpha=0.5,
+              c=_COLOR_NEITHER, label=f'neither (n={int(neither.sum())})')
+   ax.scatter(x[one_only], y[one_only], s=8, alpha=0.7,
+              c=_COLOR_ONE, label=f'one only (n={int(one_only.sum())})')
+   ax.scatter(x[both], y[both], s=10, alpha=0.85,
+              c=_COLOR_BOTH, label=f'both (n={int(both.sum())})')
+   ```
+
+8. **Reference lines and a 1:1 diagonal.** The diagonal is the eye's anchor for "do the two platforms agree on direction *and* magnitude?":
+
+   ```python
+   lim = float(max(np.abs(x).max(), np.abs(y).max())) * 1.05
+   ax.set_xlim(-lim, lim)
+   ax.set_ylim(-lim, lim)
+   ax.axhline(0, color='grey', linewidth=0.6, linestyle='--')
+   ax.axvline(0, color='grey', linewidth=0.6, linestyle='--')
+   ax.plot([-lim, lim], [-lim, lim], color='grey', linewidth=0.6, linestyle=':')
+   ```
+
+   Square axes (`figsize=(7, 7)` + symmetric limits) so a slope-1 line is actually 45°.
+
+9. **Annotate the top concordant genes** — `annotate_top` rows with the smallest `combined_rank` among the both-significant set:
+
+   ```python
+   if annotate_top > 0 and not shared.empty:
+       top = shared.head(annotate_top)
+       for _, row in top.iterrows():
+           ax.annotate(
+               str(row['gene_symbol']),
+               xy=(row[f'log2FC_{label_a}'], row[f'log2FC_{label_b}']),
+               xytext=(4, 4), textcoords='offset points',
+               fontsize=7,
+           )
+   ```
+
+   `shared` is already sorted by `combined_rank` from step 5, so `.head(annotate_top)` is correct without re-sorting. Skip cleanly if `annotate_top <= 0` or `shared` is empty.
+
+10. **Title, labels, legend, save:**
+
+    ```python
+    ax.set_xlabel(f'log2FC ({label_a})')
+    ax.set_ylabel(f'log2FC ({label_b})')
+    ax.set_title(
+        f'log2FC concordance: Pearson r={pearson_r:.3f}, '
+        f"Spearman ρ={spearman_rho:.3f} "
+        f"(n={len(joined)})"
+    )
+    ax.legend(loc='upper left', fontsize=8)
+    fig.savefig(os.path.join(output_dir, _SCATTER_PNG_NAME), **_SAVEFIG_KW)
+    plt.close(fig)
+    logger.info("wrote %s", _SCATTER_PNG_NAME)
+    ```
+
+    `ρ` (Greek rho) renders correctly in matplotlib without needing a TeX-mode title. Stick to ASCII in the source so the file stays grep-friendly.
+
+11. **Build and write the summary text.** Plain text, key-value lines — easy to diff between runs and parse with `awk`/`cut` if the user wants to script over results:
+
+    ```python
+    only_a = set_a - set_b
+    only_b = set_b - set_a
+    both_set = set_a & set_b
+    union = set_a | set_b
+    jaccard = len(both_set) / len(union) if union else 0.0
+
+    if both_set:
+        signs_a = np.sign(de_a.set_index('gene_symbol').loc[list(both_set), 'log2FC'])
+        signs_b = np.sign(de_b.set_index('gene_symbol').loc[list(both_set), 'log2FC'])
+        same_sign = int((signs_a == signs_b).sum())
+        concordance = same_sign / len(both_set)
+    else:
+        same_sign = 0
+        concordance = float('nan')
+
+    lines = [
+        f"comparison: {label_a} vs {label_b}",
+        f"thresholds: adj_p < {adj_p_max}, |log2FC| >= {abs_log2fc_min}",
+        f"genes joined on gene_symbol (inner): {len(joined)}",
+        "",
+        f"significant in {label_a}: {len(set_a)}",
+        f"significant in {label_b}: {len(set_b)}",
+        f"significant in both:    {len(both_set)}",
+        f"only in {label_a}:       {len(only_a)}",
+        f"only in {label_b}:       {len(only_b)}",
+        "",
+        f"jaccard:               {jaccard:.4f}",
+        f"sign concordance:      {concordance:.4f} ({same_sign}/{len(both_set)})",
+        f"pearson r (joined):    {pearson_r:.4f}",
+        f"spearman rho (joined): {spearman_rho:.4f}",
+    ]
+    summary_path = os.path.join(output_dir, _SUMMARY_TXT_NAME)
+    with open(summary_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines) + '\n')
+    logger.info("wrote %s", _SUMMARY_TXT_NAME)
+    ```
+
+    Trailing newline because most editors expect it. `encoding='utf-8'` for Windows safety — the rest of the project assumes UTF-8.
+
+12. **Return the joined frame:**
+
+    ```python
+    return joined
+    ```
+
+### Edge cases to be aware of
+
+- **Empty intersection on `gene_symbol`** (different platforms with no shared symbols, or one input had its symbols stripped) → step 3 raises `ValueError`. The error message is actionable; better than three blank output files.
+- **One dataset has zero significant genes** at the chosen thresholds → `set_a` (or `set_b`) is empty, `jaccard` = 0, `shared_de_genes.csv` is header-only. Scatter still renders with grey + one color of dots. The summary tells the user immediately what's happening.
+- **All both-significant genes have the same direction** → `concordance = 1.0`. Boring but correct; happens with strongly-conserved signatures (e.g. tumor vs normal lung across two cohorts).
+- **`adj_p_value` of exactly `0.0`** in either dataset → flagged significant by the `<` test, no special handling needed (unlike the volcano's `-log10` clip — `compare.py` doesn't log-transform p-values).
+- **Duplicate `gene_symbol`** in inputs → step 1 raises. We don't silently dedupe; the user has the wrong shape and needs to fix `run_diffex`.
+- **Massive log2FC outliers** (zero variance in one group → `±inf`) → caught by step 3's NaN drop only if they are NaN, not if they are `±inf`. If `inf` reaches the scatter, matplotlib autoscales to a useless figure. If this surfaces in real data, filter `±inf` in `differential_expression` upstream rather than papering over it here — same call as `volcano.py`.
+- **Re-running compare** overwrites all three files. Acceptable — they're regenerable.
+
+### `ge.py` integration
+
+The handler `_cmd_compare` loads two datasets, runs `diffex` with collapse on each, and dispatches to `run_compare`:
+
+```python
+def _cmd_compare(args: argparse.Namespace) -> None:
+    de_a = _diffex_for(args.accession_a, args)
+    de_b = _diffex_for(args.accession_b, args)
+    out_dir = os.path.join(
+        _result_root(),
+        f'compare_{args.accession_a}_vs_{args.accession_b}',
+    )
+    compare.run_compare(
+        de_a, de_b, out_dir,
+        label_a=args.accession_a, label_b=args.accession_b,
+        adj_p_max=args.adj_p_max,
+        abs_log2fc_min=args.abs_log2fc_min,
+    )
+
+def _diffex_for(accession: str, args: argparse.Namespace) -> pd.DataFrame:
+    expression, samples, annotation = shared_utils.load_geo_dataset(
+        accession, cache_dir=_data_dir(),
+    )
+    samples = shared_utils.assign_groups(
+        samples,
+        source_col=args.group_col,
+        substrings={args.group_a: args.group_a, args.group_b: args.group_b},
+    )
+    return diffex.run_diffex(
+        expression, samples, annotation,
+        args.group_a, args.group_b,
+        output_dir=None,             # don't overwrite per-dataset de.csv here
+        collapse_to_gene=True,       # required by run_compare
+        print_head=False,
+    )
+```
+
+`output_dir=None` because the per-accession `de.csv` may already exist from a prior `ge.py diffex` run — don't overwrite it with the collapsed version. The collapsed frames live only in memory for the comparison.
+
+The argparse block:
+
+```python
+cmp_p = sub.add_parser('compare', help='cross-dataset DE comparison')
+cmp_p.add_argument('--accession-a', required=True)
+cmp_p.add_argument('--accession-b', required=True)
+cmp_p.add_argument('--group-col', required=True,
+                   help='metadata column used for both datasets')
+cmp_p.add_argument('--group-a', required=True)
+cmp_p.add_argument('--group-b', required=True)
+cmp_p.add_argument('--adj-p-max', type=float, default=0.05)
+cmp_p.add_argument('--abs-log2fc-min', type=float, default=1.0)
+```
+
+`--group-col` / `--group-a` / `--group-b` are reused for both datasets, which is wrong for the recommended GSE19804/GSE10072 pairing: GSE19804's `source_name_ch1` says `"... tumor ..."` while GSE10072's says `"Adenocarcinoma of the Lung"`. Same biology, different wording. Two ways out:
+
+1. **Per-dataset substrings (preferred).** Add `--tumor-substring-a` / `--tumor-substring-b` (and similar for normal) so the user can map each dataset's wording onto a shared `group` label. Both datasets still get assigned `group='tumor'` / `group='normal'` so `run_compare`'s join works unchanged.
+2. **Document and skip the CLI for cross-cohort runs.** Tell the user to drop into Python and call `run_compare` directly with two pre-collapsed `de_results` frames built using whatever per-dataset substrings each one needs (this is what the verification snippet below does).
+
+Pick (1) for v1 if `compare` is a first-class subcommand; otherwise document (2) in [readme.md](readme.md).
+
+### Verification
+
+Extend [test.py](test.py) with:
+
+```python
+import logging, os
+from src import diffex, compare
+from shared_utils import load_geo_dataset, assign_groups
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+
+def collapsed_de(accession, tumor_substring='tumor'):
+    expression, samples, annotation = load_geo_dataset(accession, cache_dir='data')
+    samples = assign_groups(
+        samples,
+        source_col='source_name_ch1',
+        substrings={'tumor': tumor_substring, 'normal': 'normal'},
+    )
+    return diffex.run_diffex(
+        expression, samples, annotation, 'tumor', 'normal',
+        output_dir=None, collapse_to_gene=True, print_head=False,
+    )
+
+# GSE19804 uses 'tumor' in source_name_ch1; GSE10072 uses 'Adenocarcinoma of the Lung'.
+# Both keep the assigned group label as 'tumor' so the downstream join lines up.
+de_a = collapsed_de('GSE19804')
+de_b = collapsed_de('GSE10072', tumor_substring='adenocarcinoma')
+out = os.path.join('result', 'compare_GSE19804_vs_GSE10072')
+joined = compare.run_compare(de_a, de_b, out,
+                             label_a='GSE19804', label_b='GSE10072')
+print('joined shape:', joined.shape)
+for fname in ('shared_de_genes.csv', 'log2fc_scatter.png', 'overlap_summary.txt'):
+    print(fname, 'exists:', os.path.exists(os.path.join(out, fname)))
+```
+
+Expected for GSE19804 vs GSE10072 (both lung cancer tumor vs normal):
+
+1. Log line `joined ~21000 × ~13000 genes -> ~12000 shared on gene_symbol` — exact counts depend on annotation completeness, but the inner-join size is bounded by the smaller of the two collapsed lists.
+2. Three files appear in `result/compare_GSE19804_vs_GSE10072/`.
+3. `overlap_summary.txt` shows `pearson r` and `spearman rho` both around `0.7–0.85` — strong concordance is expected because the two studies measure the same biology on related platforms.
+4. `sign concordance` is around `0.95+` among both-significant genes — when both studies call a gene differentially expressed, they nearly always agree on direction.
+5. `shared_de_genes.csv` first rows include known lung-cancer markers — `SPP1`, `MMP1`, `MMP12`, `WIF1`, `AGER` — the same set that volcano/heatmap surfaced per-dataset.
+6. `log2fc_scatter.png` — points cluster along the y=x diagonal; red (both-significant) dots concentrate in the upper-right and lower-left quadrants; few red dots straddle the off-diagonal quadrants (which would indicate disagreement on direction).
+7. Re-run with `adj_p_max=0.01, abs_log2fc_min=2.0`: scatter is unchanged in shape, but the red/orange/grey ratio shifts toward grey; `shared_de_genes.csv` shrinks; correlations on the joined set are unchanged (they're computed over the full overlap, not the significant subset).
 
 ## Output directory layout (runtime)
 

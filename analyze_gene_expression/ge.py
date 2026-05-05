@@ -90,6 +90,17 @@ def _build_parser() -> argparse.ArgumentParser:
     hm_p.add_argument('--adj-p-max', type=float, default=0.05)
     hm_p.add_argument('--abs-log2fc-min', type=float, default=1.0)
 
+    # ---- compare ----
+    cmp_p = sub.add_parser('compare', help='cross-dataset DE comparison')
+    cmp_p.add_argument('--accession-a', required=True)
+    cmp_p.add_argument('--accession-b', required=True)
+    cmp_p.add_argument('--group-col', required=True,
+                    help='metadata column used for both datasets')
+    cmp_p.add_argument('--group-a', required=True)
+    cmp_p.add_argument('--group-b', required=True)
+    cmp_p.add_argument('--adj-p-max', type=float, default=0.05)
+    cmp_p.add_argument('--abs-log2fc-min', type=float, default=1.0)
+   
     # ---- all ----
     all_p = sub.add_parser('all', help='run eda -> diffex -> volcano -> heatmap end-to-end')
     all_p.add_argument('--accession', required=True)
@@ -161,6 +172,38 @@ def _cmd_heatmap(args: argparse.Namespace) -> None:
         adj_p_max=args.adj_p_max,
         abs_log2fc_min=args.abs_log2fc_min,
     )
+
+def _cmd_compare(args: argparse.Namespace) -> None:
+    de_a = _diffex_for(args.accession_a, args)
+    de_b = _diffex_for(args.accession_b,args)
+
+    out_dir = os.path.join(
+        _result_root(),
+        f"compare_{args.accession_a}_vs_{args.accession_b}",
+    )
+    compare.run_compare(
+        de_a, de_b, out_dir,
+        label_a=args.accession_a, label_b=args.accession_b,
+        adj_p_max=args.adj_p_max,
+        abs_log2fc_min=args.abs_log2fc_min,
+    )
+
+# helper for compare
+def _diffex_for(accession: str, args: argparse.Namespace) -> pd.DataFrame:
+    expression, samples, annotation = su.load_geo_dataset(accession, cache_dir=_data_dir())
+    samples = su.assign_groups(
+        samples, 
+        source_col=args.group_col,
+        substrings={args.group_a:args.group_a, args.group_b: args.group_b},
+    )
+    return diffex.run_diffex(
+        expression, samples, annotation,
+        args.group_a, args.group_b,
+        output_dir=None,
+        collapse_to_gene=True,
+        print_head=False,
+    )
+
 
 def main(argv: list[str] | None=None) -> None:
     parser = _build_parser()

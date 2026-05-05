@@ -40,4 +40,5 @@ Developed and evaluated accuracy of various machine learning models in predictin
 ### [Cancer Cell Classification](CancerCellClassification)
 A scikit-learn script that trains a Gaussian Naive Bayes classifier on the built-in breast cancer dataset to predict if a tumor is malignant or benign. Achieved 94.15% accuracy with a 67/33 train/test split.
 
-
+## Bioinformatics
+### [Gene Expression](analyze_gene_expression)

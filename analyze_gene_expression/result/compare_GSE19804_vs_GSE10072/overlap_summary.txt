@@ -1,0 +1,14 @@
+comparison: GSE19804 vs GSE10072
+thresholds: adj_p < 0.05, |log2FC| >= 1.0
+genes joined on gene_symbol (inner): 13515
+
+significant in GSE19804: 1342
+significant in GSE10072: 650
+significant in both:    493
+only in GSE19804:       849
+only in GSE10072:       157
+
+jaccard:               0.3289
+sign concordance:      1.0000 (493/493)
+pearson r (joined):    0.8229
+spearman rho (joined): 0.7706
