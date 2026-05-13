@@ -42,3 +42,4 @@ A scikit-learn script that trains a Gaussian Naive Bayes classifier on the built
 
 ## Bioinformatics
 ### [Gene Expression](analyze_gene_expression)
+A CLI for analyzing gene expression microarray data from the NCBI Gene Expression Omnibus (GEO). Auto-downloads datasets by accession via GEOparse, then runs EDA (PCA, sample boxplots, correlation heatmaps, gene-variance histograms), differential expression (Welch's t-test with Benjamini–Hochberg FDR), volcano plots, clustered heatmaps of top DE genes, and cross-dataset comparison (shared DE genes and log2 fold-change concordance). Built with pandas, NumPy, SciPy, statsmodels, scikit-learn, matplotlib, and seaborn; validated on the GSE19804 and GSE10072 lung cancer series.
