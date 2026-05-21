@@ -1,0 +1,13 @@
+year,iso3,country,who_region,latitude,longitude,syndrome,confirmed_cases,deaths,recovered,case_fatality_rate,hospitalized,icu_admissions,human_to_human_cases
+1976,COD,Democratic Republic of the Congo,AFRO,-4.04,21.75,EVD,318,280,6,88.1,305,28,0
+1976,SDN,Sudan,AFRO,12.86,30.22,SVD,284,151,129,53.2,268,18,0
+1995,COD,Democratic Republic of the Congo,AFRO,-4.04,21.75,EVD,315,250,45,79.4,290,30,0
+2000,UGA,Uganda,AFRO,1.37,32.29,SVD,425,224,185,52.7,398,42,0
+2014,GIN,Guinea,AFRO,9.51,-13.71,EVD,3000,1800,1100,60.0,2800,210,0
+2015,SLE,Sierra Leone,AFRO,8.46,-11.78,EVD,14000,3950,9800,28.2,13700,840,0
+2016,LBR,Liberia,AFRO,6.43,-9.42,EVD,10676,4809,5300,45.1,10400,720,0
+2018,COD,Democratic Republic of the Congo,AFRO,-4.04,21.75,EVD,3470,2287,1100,65.9,3300,400,0
+2021,GIN,Guinea,AFRO,9.51,-13.71,EVD,23,12,9,52.2,23,4,0
+2022,COD,Democratic Republic of the Congo,AFRO,-4.04,21.75,EVD,130,55,72,42.3,128,18,0
+2026,COD,Democratic Republic of the Congo,AFRO,-4.04,21.75,BDBV,78,35,40,44.9,75,12,0
+2026,UGA,Uganda,AFRO,1.37,32.29,BDBV,12,5,6,41.7,12,3,0

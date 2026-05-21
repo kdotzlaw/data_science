@@ -1,0 +1,11 @@
+patient_id,year,country,age,sex,syndrome,symptoms,incubation_days,severity,hospitalized,icu_admission,mechanical_ventilation,outcome,exposure_type,notes
+EVD001,2014,Guinea,28,F,EVD,fever; headache; muscle pain; diarrhea,9,Severe,1,0,0,Recovered,Contact with sick family member,Delayed treatment in rural clinic
+EVD002,2014,Sierra Leone,42,M,EVD,fever; vomiting; hemorrhage; shock,7,Critical,1,1,1,Deceased,Funeral contact,Advanced disease on admission
+EVD003,2015,Liberia,35,F,EVD,fatigue; abdominal pain; rash,11,Moderate,1,0,0,Recovered,Hospital-acquired exposure,Managed with IV fluids
+EVD004,2018,Democratic Republic of the Congo,23,M,EVD,fever; cough; diarrhea; confusion,8,Severe,1,1,1,Recovered,Health worker exposure,Used monoclonal therapy
+EVD005,2021,Guinea,19,F,EVD,fever; sore throat; vomiting,12,Moderate,1,0,0,Recovered,Community transmission,Early isolation helped
+EVD006,2022,Democratic Republic of the Congo,50,M,EVD,fever; vomiting; bleeding gums,6,Critical,1,1,1,Deceased,Household contact,High-risk exposure
+EVD007,2026,Uganda,46,F,BDBV,fever; headache; abdominal pain,10,Moderate,1,0,0,Recovered,Family contact,Part of current emergency cluster
+EVD008,2026,Democratic Republic of the Congo,34,M,BDBV,fever; diarrhea; conjunctivitis,14,Severe,1,0,0,Recovered,Wildlife exposure,Linked to forest hunting
+EVD009,2026,Democratic Republic of the Congo,60,M,BDBV,fever; weakness; nausea,12,Critical,1,1,1,Deceased,Health facility transmission,Exposed during care
+EVD010,2016,Guinea,26,F,EVD,fever; diarrhea; headache,8,Moderate,1,0,0,Recovered,Contact tracing case,Rapid supportive care

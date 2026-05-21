@@ -1,0 +1,12 @@
+year,month,country,virus_species,confirmed_cases,deaths,case_fatality_rate
+2014,12,Guinea,Ebola virus,120,70,58.3
+2015,01,Sierra Leone,Ebola virus,820,260,31.7
+2015,09,Liberia,Ebola virus,256,108,42.2
+2016,03,Guinea,Ebola virus,5,2,40.0
+2018,08,Democratic Republic of the Congo,Ebola virus,27,18,66.7
+2019,01,Democratic Republic of the Congo,Ebola virus,95,60,63.2
+2021,03,Guinea,Ebola virus,7,4,57.1
+2022,05,Democratic Republic of the Congo,Ebola virus,33,14,42.4
+2022,06,Democratic Republic of the Congo,Ebola virus,52,22,42.3
+2026,05,Democratic Republic of the Congo,Bundibugyo virus,42,19,45.2
+2026,05,Uganda,Bundibugyo virus,6,3,50.0

@@ -1,0 +1,12 @@
+factor_category,factor,impact_level,evidence_score,description
+Wildlife,Contact with fruit bats,High,9,Primary zoonotic spillover source for Ebola virus
+Wildlife,Handling dead primates,High,8,Known route of human infection in forest settings
+Human-to-human,Direct contact with body fluids,Very High,10,Primary transmission path in outbreaks
+Human-to-human,Unsafe caregiving practices,Very High,10,Most common risk for family clusters
+Human-to-human,Funeral rites with contact,High,9,Traditional burials drive spread in West Africa
+Healthcare,Insufficient PPE,Very High,10,Strongly linked to nosocomial transmission
+Healthcare,Contaminated surfaces,High,8,Can transmit via needles and fomites
+Travel,Movement across borders,Medium,7,Leads to cross-border outbreak importation
+Diagnostics,Delayed testing,High,9,Delays increase case counts and secondary spread
+Community,Low awareness,Medium,7,Impacts speed of isolation and contact tracing
+Recovery,Survivor viral persistence,Medium,8,Can cause rare relapse and sexual transmission

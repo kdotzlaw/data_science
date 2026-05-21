@@ -1,0 +1,9 @@
+start_date,end_date,country,virus_species,cases,deaths,fatality_rate,description,who_emergency_status,notes
+1976-08-26,1976-11-05,Democratic Republic of the Congo,Ebola virus,318,280,88.1,First recorded outbreak near the Ebola River,No,Simultaneous DRC/Sudan outbreaks
+1976-06-27,1976-11-24,Sudan,Sudan virus,284,151,53.2,Early Sudan outbreak in Nzara,No,One of two original epidemics
+1995-05-06,1995-07-16,Democratic Republic of the Congo,Ebola virus,315,250,79.4,Kikwit outbreak mobilized rapid response,No,High fatality but contained
+2014-12-02,2016-06-09,Guinea/Liberia/Sierra Leone,Ebola virus,28616,11310,39.5,West Africa epidemic with global response,Yes,Most severe pandemic-era outbreak
+2018-08-01,2020-06-25,Democratic Republic of the Congo,Ebola virus,3470,2287,65.9,Conflict-zone outbreak with vaccination response,Yes,Use of ring vaccination and monoclonals
+2021-02-14,2021-06-03,Guinea,Ebola virus,23,12,52.2,Contained flare-up through rapid surveillance,No,Early detection and contact tracing
+2022-04-21,2022-07-06,Democratic Republic of the Congo,Ebola virus,130,55,42.3,Équateur Province outbreak,No,Fast response limited spread
+2026-05-01,2026-05-17,Democratic Republic of the Congo/Uganda,Bundibugyo virus,90,40,44.4,Current WHO-declared emergency,Yes,Cross-border outbreak response ongoing

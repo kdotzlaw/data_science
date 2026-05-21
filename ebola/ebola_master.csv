@@ -1,0 +1,9 @@
+country,iso3,first_outbreak_year,total_outbreaks,total_cases,total_deaths,average_cfr,latest_outbreak_year,most_common_species,human_to_human_transmission_risk
+Democratic Republic of the Congo,COD,1976,11,7600,4600,60.5,2026,Ebola virus,Moderate
+Guinea,GIN,1976,5,9600,4100,42.7,2021,Ebola virus,Low
+Sierra Leone,SLE,1976,3,14700,4000,27.2,2016,Ebola virus,Low
+Liberia,LBR,1976,2,11000,4900,44.5,2016,Ebola virus,Low
+Uganda,UGA,1976,7,2300,1260,54.8,2026,Sudan virus,Low
+Sudan,SDN,1976,2,770,371,48.2,2004,Sudan virus,Low
+Gabon,GAB,1976,5,600,390,65.0,2002,Ebola virus,Low
+Côte d'Ivoire,CIV,1990,1,1,0,0.0,1994,Taï Forest virus,Low

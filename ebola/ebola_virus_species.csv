@@ -1,0 +1,6 @@
+species,common_name,known_hosts,region,first_outbreak,case_fatality_rate,vaccine_available,human_to_human_transmission
+Ebola virus,Ebola virus,Humans; fruit bats; primates,Africa,1976,50-90%,Yes,No
+Sudan virus,Sudan virus,Humans; bats; primates,Africa,1976,41-53%,No,No
+Bundibugyo virus,Bundibugyo virus,Humans; bats,Africa,2007,25-40%,No,No
+Taï Forest virus,Taï Forest virus,Humans; primates,Africa,1994,~25%,No,No
+Reston virus,Reston virus,Non-human primates; pigs,Asia/Philippines,1989,0% in humans,No,No

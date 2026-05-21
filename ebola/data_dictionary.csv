@@ -1,0 +1,72 @@
+file,column,type,description
+ebola_country_yearly.csv,year,int,Calendar year of reported data
+ebola_country_yearly.csv,iso3,str,ISO 3166-1 alpha-3 country code
+ebola_country_yearly.csv,country,str,Country name
+ebola_country_yearly.csv,who_region,str,WHO regional office
+ebola_country_yearly.csv,latitude,float,Country centroid latitude
+ebola_country_yearly.csv,longitude,float,Country centroid longitude
+ebola_country_yearly.csv,syndrome,str,Disease syndrome type (EVD/SVD/BVD)
+ebola_country_yearly.csv,confirmed_cases,int,Annual confirmed cases
+ebola_country_yearly.csv,deaths,int,Annual confirmed deaths
+ebola_country_yearly.csv,recovered,int,Annual recovered patients
+ebola_country_yearly.csv,case_fatality_rate,float,Annual case fatality rate percentage
+ebola_country_yearly.csv,hospitalized,int,Annual hospitalized patients
+ebola_country_yearly.csv,icu_admissions,int,Annual ICU admissions
+ebola_country_yearly.csv,human_to_human_cases,int,Documented human-to-human transmission cases
+ebola_outbreaks.csv,start_date,date,Outbreak start date
+ebola_outbreaks.csv,end_date,date,Outbreak end date
+ebola_outbreaks.csv,country,str,Country or region affected
+ebola_outbreaks.csv,virus_species,str,Confirmed Ebola species
+ebola_outbreaks.csv,cases,int,Confirmed case count in outbreak
+ebola_outbreaks.csv,deaths,int,Confirmed deaths in outbreak
+ebola_outbreaks.csv,fatality_rate,float,Case fatality rate percentage
+ebola_outbreaks.csv,description,str,Brief outbreak description
+ebola_outbreaks.csv,who_emergency_status,str,WHO emergency status flag
+ebola_outbreaks.csv,notes,str,Additional outbreak context
+ebola_monthly_trends.csv,year,int,Year of monthly record
+ebola_monthly_trends.csv,month,int,Month of record (1-12)
+ebola_monthly_trends.csv,country,str,Country name
+ebola_monthly_trends.csv,virus_species,str,Virus species
+ebola_monthly_trends.csv,confirmed_cases,int,Monthly confirmed cases
+ebola_monthly_trends.csv,deaths,int,Monthly confirmed deaths
+ebola_monthly_trends.csv,case_fatality_rate,float,Monthly case fatality rate percentage
+ebola_clinical.csv,patient_id,str,Unique synthetic patient ID
+ebola_clinical.csv,year,int,Year of infection
+ebola_clinical.csv,country,str,Country of infection
+ebola_clinical.csv,age,int,Patient age in years
+ebola_clinical.csv,sex,str,Patient sex (M/F)
+ebola_clinical.csv,syndrome,str,Disease syndrome type
+ebola_clinical.csv,symptoms,str,Comma-separated symptom list
+ebola_clinical.csv,incubation_days,int,Incubation period in days
+ebola_clinical.csv,severity,str,Clinical severity category
+ebola_clinical.csv,hospitalized,int,Hospitalized flag
+ebola_clinical.csv,icu_admission,int,ICU admission flag
+ebola_clinical.csv,mechanical_ventilation,int,Mechanical ventilation flag
+ebola_clinical.csv,outcome,str,Patient outcome
+ebola_clinical.csv,exposure_type,str,Exposure route or setting
+ebola_clinical.csv,notes,str,Clinical and epidemiological notes
+ebola_transmission_factors.csv,factor_category,str,Transmission factor category
+ebola_transmission_factors.csv,factor,str,Specific transmission risk factor
+ebola_transmission_factors.csv,impact_level,str,Relative impact of the factor
+ebola_transmission_factors.csv,evidence_score,int,Evidence confidence score (1-10)
+ebola_transmission_factors.csv,description,str,Description of transmission risk
+ebola_virus_species.csv,species,str,Scientific virus species name
+ebola_virus_species.csv,common_name,str,Common species name
+ebola_virus_species.csv,known_hosts,str,Known host species
+ebola_virus_species.csv,region,str,Primary geographic region
+ebola_virus_species.csv,first_outbreak,str,Year of first human outbreak
+ebola_virus_species.csv,case_fatality_rate,str,Typical case fatality rate range
+ebola_virus_species.csv,vaccine_available,str,Vaccine availability status
+ebola_virus_species.csv,human_to_human_transmission,str,Evidence of human-to-human transmission
+ebola_outbreak_timeline.csv,start_date,date,Timeline event start date
+ebola_outbreak_timeline.csv,end_date,date,Timeline event end date
+ebola_outbreak_timeline.csv,country,str,Country or region in timeline
+ebola_outbreak_timeline.csv,virus_species,str,Ebola virus species referenced
+ebola_outbreak_timeline.csv,cases,str,Reported cases in timeline event
+ebola_outbreak_timeline.csv,deaths,str,Reported deaths in timeline event
+ebola_outbreak_timeline.csv,fatality_rate,str,Reported fatality rate in timeline event
+ebola_outbreak_timeline.csv,notes,str,Additional timeline event notes
+ebola_virus_facts.csv,category,str,Fact category
+ebola_virus_facts.csv,item,str,Fact item
+ebola_virus_facts.csv,value,str,Fact value
+ebola_virus_facts.csv,details,str,Detailed context or explanation
