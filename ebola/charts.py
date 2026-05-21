@@ -7,8 +7,17 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 
+#---HELPER FUNCTIONS---
+def _midpoint(yr):
+    s = str(yr)
+    if '-' in s:
+        a,b = s.split('-')
+        return (int(a) + int(b))//2
+    return int(s)
+
 '''
 ----outbreak_gantt----
+creates a gantt chart from the given data frame
 INPUT: data frame loaders.load_outbreaks()
 OUTPUT: graph object figure
 '''
@@ -58,4 +67,89 @@ def outbreak_gantt(df: pd.DataFrame) -> go.Figure:
         yaxis_title="",
         title="Recorded Ebola Outbreaks",
     )
+    return fig
+
+'''
+----crf_vs_size----
+creates a CFR vs outbreak size scatter plot from the given data frame
+INPUT: data frame loaders.load_outbreaks()
+OUTPUT: graph object figure
+'''
+def cfr_vs_size(df: pd.DataFrame) -> go.Figure:
+
+    # derive decade label
+    df = df.assign(decade=(df['start_date'].dt.year // 10 * 10).astype(str)+'s')
+    
+    # build scatter plot
+    fig = px.scatter(
+        df,
+        x='cases',
+        y = 'fatality_rate',
+        size='deaths',
+        color='decade',
+        hover_name='country',
+        hover_data=['virus_species','description'],
+        log_x=True,
+        labels={'cases':'Cases (log)','fatality_rate':'CFR (%)'}, 
+    )
+
+    # log-linear fit line
+    coeffs = np.polyfit(np.log10(df['cases']),df['fatality_rate'],1)
+    xs = np.logspace(np.log10(df['cases'].min()),
+                     np.log10(df['cases'].max()),50)
+    fig.add_trace(go.Scatter(
+        x=xs,
+        y=np.polyval(coeffs, np.log10(xs)),
+        mode='lines',
+        line_dash='dot',
+        name='log-linear fit',
+    ))
+    fig.update_layout(title='CFR vs Outbreak Size',height=450)
+    return fig
+
+'''
+----cumulative_deaths----
+creates annotated cumulative deaths timeline
+INPUT: data frame loaders.load_country_yearly, data frame loaders.load_outbreak_timeline
+OUTPUT: graph object figure of cumulative deaths (yearly)
+'''
+def cumulative_deaths(yearly: pd.DataFrame, timeline: pd.DataFrame) -> go.Figure:
+    # aggregate yearly deaths by country
+    agg = yearly.groupby(['country','year'],as_index=False)['deaths'].sum()
+    agg = agg.sort_values(['country','year'])
+    
+    #create aggregate cumulative-death col
+    agg['cumulative_deaths'] = agg.groupby('country')['deaths'].cumsum()
+
+    # create line chart
+    fig = px.line(
+        agg,
+        x='year',
+        y='cumulative_deaths',
+        color='country',
+        markers=True,
+    )
+
+    # year has ranges so collapse to midpoint
+    timeline = timeline.assign(plot_year=timeline['year'].apply(_midpoint))
+
+    # add vertical line & annotation per timeline event
+    for _, ev in timeline.iterrows():
+        fig.add_vline(
+            x=ev['plot_year'],
+            line_dash='dot',
+            line_color='gray',
+            opacity=0.4
+        )
+        fig.add_annotation(
+            x=ev['plot_year'],
+            y=1,
+            yref='paper',
+            text=(ev['notes'] or "")[:40]+'...',
+            textangle=-90,
+            showarrow=False,
+            font_size=9,
+        )
+    fig.update_layout(title='Cumulative Deaths by Country',height=500)
+    
     return fig
