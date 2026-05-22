@@ -1,5 +1,5 @@
-from loaders import load_outbreaks, load_country_yearly, load_outbreak_timeline, load_master 
-from charts import outbreak_gantt, cfr_vs_size, cumulative_deaths, bubble_map
+from loaders import load_outbreaks, load_country_yearly, load_outbreak_timeline, load_master,load_clinical
+from charts import outbreak_gantt, cfr_vs_size, cumulative_deaths, bubble_map,symptom_coocurrance
 from utils import save_figure
 
 
@@ -20,5 +20,10 @@ if __name__=='__main__':
     fig = cumulative_deaths(load_country_yearly(),load_outbreak_timeline())
     save_figure(fig, "cumulative_deaths")
     '''
+    '''test bubble map
     fig = bubble_map(load_master(), load_country_yearly())
     save_figure(fig,"bubble_map")
+    '''
+
+    fig = symptom_coocurrance(load_clinical())
+    save_figure(fig,'symptom_cooccurance')

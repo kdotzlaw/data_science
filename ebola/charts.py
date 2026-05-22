@@ -186,3 +186,36 @@ def bubble_map(master: pd.DataFrame, yearly:pd.DataFrame)->go.Figure:
     fig.update_geos(scope='africa')
     fig.update_layout(title='Total Cases & Average CFR by Country',height=550)
     return fig
+
+'''
+----symptom_cooccurance----
+INPUT: data frame loaders.load_clinical->symptom_list
+OUTPUT: heatmap
+'''
+def symptom_coocurrance(df:pd.DataFrame)->go.Figure:
+    # built patient x symptom binary matrix
+    exploded = df.explode('symptom_list')
+    binary = pd.crosstab(exploded['patient_id'],exploded['symptom_list'])
+    binary = (binary>0).astype(int)
+
+    # calc co-occurance
+    # diag holds symptom frequency
+    cooc = binary.T @ binary
+
+    # 0 diagonal so heatmap isnt dominated
+    np.fill_diagonal(cooc.values, 0)
+
+    # order symptoms by total frequency desc (strongest pairs top left)
+    order = cooc.sum().sort_values(ascending=False).index
+    cooc=cooc.loc[order,order]
+
+    # plot heatmap
+    fig = px.imshow(
+        cooc,
+        text_auto=True,
+        aspect='auto',
+        color_continuous_scale='Blues',
+        labels=dict(color='Co-occurance'),
+    )
+    fig.update_layout(title='Symptom Co-Occurance (n=10 patients)',height=550)
+    return fig
