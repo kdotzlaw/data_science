@@ -153,3 +153,36 @@ def cumulative_deaths(yearly: pd.DataFrame, timeline: pd.DataFrame) -> go.Figure
     fig.update_layout(title='Cumulative Deaths by Country',height=500)
     
     return fig
+
+'''
+----bubble_map----
+INPUT: data frame loaders.load_master, data frame loaders.load_country_yearly
+OUTPUT: bubble map figure
+'''
+def bubble_map(master: pd.DataFrame, yearly:pd.DataFrame)->go.Figure:
+    # 1 row per country coords table from yearly
+    coords =(
+        yearly[['iso3','latitude','longitude']]
+            .drop_duplicates('iso3'))
+    df = master.merge(coords,on='iso3',how='left')
+
+    # plot bubble map
+    fig = px.scatter_geo(
+        df,
+        lat='latitude',
+        lon='longitude',
+        size='total_cases',
+        color='average_cfr',
+        hover_data=[
+            'total_outbreaks',
+            'total_deaths',
+            'latest_outbreak_year',
+            'most_common_species'
+        ],
+        color_continuous_scale='Reds',
+        size_max=40,
+        projection='natural earth'
+    )
+    fig.update_geos(scope='africa')
+    fig.update_layout(title='Total Cases & Average CFR by Country',height=550)
+    return fig
