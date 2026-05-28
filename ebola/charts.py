@@ -219,3 +219,54 @@ def symptom_coocurrance(df:pd.DataFrame)->go.Figure:
     )
     fig.update_layout(title='Symptom Co-Occurance (n=10 patients)',height=550)
     return fig
+
+
+'''
+----transmission_lollipop----
+INPUT: data frame loaders.load_transmission_factors()->impact_rank
+OUTPUT: 
+'''
+def transmission_lollipop(df:pd.DataFrame)->go.Figure:
+    # sort by category, scores desc
+    df = df.sort_values(['factor_category','evidence_score'],
+                        ascending=[True,False]).reset_index(drop=True)
+    # build line and scatter plot to simulate lollipop
+    fig = go.Figure()
+    for _, row in df.iterrows():
+        fig.add_shape(
+            type='line',
+            x0=0,
+            x1=row['evidence_score'],
+            y0=row['factor'],
+            y1=row['factor'],
+            line=dict(color='lightgray',width=2),
+        )
+    fig.add_trace(go.Scatter(
+        x=df['evidence_score'],
+        y=df['factor'],
+        marker=dict(
+            size=14,
+            color=df['impact_rank'],
+            colorscale='Reds',
+            showscale=True,
+            colorbar=dict(
+                title='Impact',
+                tickvals=[1,2,3,4],
+                ticktext=['Low','Med','High','Very High']
+            ),
+        ),
+        text=df['factor_category'],
+        hovertemplate="%{y}<br>Score: %{x}<br>Category: %{text}<extra></extra>",
+    ))
+
+    # make y axis match sorted order
+    fig.update_yaxes(categoryorder='array',categoryarray=df['factor'].to_list())
+
+    fig.update_layout(
+        xaxis_title='Evidence Score (1-10)',
+        yaxis_title="",
+        title='Transmission Risk Factors',
+        height=500,
+        margin=dict(l=220)
+    )
+    return fig

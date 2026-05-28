@@ -334,6 +334,12 @@ Each model below: **input → preparation → fit → evaluate → present**. Th
 step is the chart you add to the dashboard **and** save to `results/` via
 `utils.save_figure(fig, name)`.
 
+Put these in a new `models.py` (keep them out of `charts.py`, which stays pure
+figure code). Each function takes pre-loaded DataFrames and returns a
+`(metrics: dict, fig: go.Figure)` tuple — the dashboard renders `metrics` with
+`st.metric`/`st.dataframe`, renders the figure with `st.plotly_chart`, then saves
+the figure under the name from this table:
+
 | Model | `name` argument to `save_figure` |
 |---|---|
 | 2.1 Outcome classifier coefficients | `outcome_classifier_coefs` |
@@ -342,71 +348,259 @@ step is the chart you add to the dashboard **and** save to `results/` via
 | 2.4 Severity regression | `severity_regression` |
 | 2.5 Duration model | `duration_model` |
 
+Shared imports at the top of `models.py`:
+
+```python
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+```
+
+Model-specific `sklearn` / `statsmodels` imports are shown per section so you
+only pull in what you use.
+
+> **Date → string rule**: 2.3 builds hand-made `go.Scatter` traces from datetime
+> values. Convert any pandas `Timestamp` to an ISO string
+> (`.dt.strftime("%Y-%m-%d")`) before it touches a trace, or the PNG export via
+> kaleido fails with `TypeError: Type is not JSON serializable: Timestamp`. The
+> numeric-axis models (2.2, 2.4, 2.5) are unaffected.
+
 ### 2.1 Patient outcome classifier (start here — most defensible result)
 
-- **Input**: `ebola_clinical.csv` (10 rows — only useful as a teaching example)
+- **Input**: `loaders.load_clinical()` — `deceased` (0/1) target already present;
+  `symptom_list` already split if you want symptom features.
+- **Output**: `models.outcome_classifier(df: pd.DataFrame) -> tuple[dict, go.Figure]`.
 - **Steps**:
-  1. **Prep**: encode `sex` (M/F → 0/1), `severity` ordinal
-     (`Mild<Moderate<Severe<Critical`), one-hot `exposure_type`, drop free-text
-     `symptoms` (or split into binary indicators for top 5 symptoms).
-  2. **Target**: `outcome` → binary (`Recovered=0, Deceased=1`).
-  3. **Model**: `sklearn.linear_model.LogisticRegression(max_iter=1000)`.
-  4. **Validate**: `LeaveOneOut` CV; report mean accuracy and a 2×2 confusion
-     matrix. Do **not** report AUC on n=10.
-  5. **Present**: bar chart of model coefficients (which features push toward
-     deceased vs. recovered).
-- **Acceptance check**: `severity=Critical`, `icu_admission`, and
-  `mechanical_ventilation` come out as the strongest deceased-direction features.
+  1. **Prep** — keep the feature set tiny (n=10) and **scale**, so coefficient
+     magnitudes are comparable across a year-count and binary flags:
+     ```python
+     SEVERITY = {"Mild": 0, "Moderate": 1, "Severe": 2, "Critical": 3}
+     X = pd.DataFrame({
+         "age": df["age"],
+         "incubation_days": df["incubation_days"],
+         "severity": df["severity"].map(SEVERITY),
+         "icu_admission": df["icu_admission"],
+         "mechanical_ventilation": df["mechanical_ventilation"],
+     })
+     y = df["deceased"]
+     ```
+  2. **Validate with leave-one-out** (the only honest split at this n):
+     ```python
+     from sklearn.pipeline import make_pipeline
+     from sklearn.preprocessing import StandardScaler
+     from sklearn.linear_model import LogisticRegression
+     from sklearn.model_selection import LeaveOneOut, cross_val_predict
+     from sklearn.metrics import accuracy_score, confusion_matrix
 
-### 2.2 CFR trend by country (linear / LOESS)
+     clf = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000))
+     y_pred = cross_val_predict(clf, X, y, cv=LeaveOneOut())
+     acc = accuracy_score(y, y_pred)
+     cm = confusion_matrix(y, y_pred)
+     ```
+  3. **Refit on all rows** to read coefficients:
+     ```python
+     clf.fit(X, y)
+     coefs = pd.Series(
+         clf.named_steps["logisticregression"].coef_[0], index=X.columns
+     ).sort_values()
+     ```
+  4. **Present** — horizontal bar chart, red = pushes toward deceased:
+     ```python
+     fig = go.Figure(go.Bar(
+         x=coefs.values, y=coefs.index, orientation="h",
+         marker_color=["crimson" if c > 0 else "steelblue" for c in coefs.values],
+     ))
+     fig.update_layout(
+         title="Outcome classifier coefficients (positive → deceased)",
+         xaxis_title="Standardized coefficient", yaxis_title="", height=400,
+     )
+     return {"loo_accuracy": acc, "confusion_matrix": cm.tolist()}, fig
+     ```
+- **Gotchas**: with 3 deceased / 7 recovered, logistic regression will nearly
+  perfectly separate — coefficients are *directional*, not calibrated. Do **not**
+  one-hot `exposure_type` (nearly unique per row → instant overfit). Report
+  accuracy + confusion matrix, never AUC.
+- **Acceptance check**: `severity`, `icu_admission`, and `mechanical_ventilation`
+  are the largest positive (deceased-direction) bars.
 
-- **Input**: `ebola_country_yearly.csv`
+### 2.2 CFR trend by country (linear with CI band)
+
+- **Input**: `loaders.load_country_yearly()`.
+- **Output**: `models.cfr_trend(yearly: pd.DataFrame) -> tuple[dict, go.Figure]`.
 - **Steps**:
-  1. For each country with ≥ 3 rows, fit `case_fatality_rate ~ year` using
-     `numpy.polyfit(deg=1)` or `statsmodels.OLS`.
-  2. Plot the observed points and the fit line per country (small multiples).
-  3. Report slope and a wide confidence band (`statsmodels` gives this for free).
-- **Acceptance check**: DRC shows a downward CFR slope; you can articulate this as
-  "response capability improving" with an honest "n is small" caveat.
+  1. A country-year can hold multiple syndromes — aggregate, then recompute a
+     pooled CFR:
+     ```python
+     agg = (yearly.groupby(["country", "year"], as_index=False)
+            .agg(cases=("confirmed_cases", "sum"), deaths=("deaths", "sum")))
+     agg["cfr"] = agg["deaths"] / agg["cases"] * 100
+     ```
+  2. Fit `cfr ~ year` per country with **≥ 3 distinct years** (only DRC qualifies
+     in this dataset), capturing the CI band from statsmodels:
+     ```python
+     import statsmodels.api as sm
+
+     fig = go.Figure()
+     slopes = {}
+     for country, g in agg.groupby("country"):
+         if g["year"].nunique() < 3:
+             continue
+         g = g.sort_values("year")
+         model = sm.OLS(g["cfr"], sm.add_constant(g["year"])).fit()
+         slopes[country] = round(model.params["year"], 3)
+         pred = model.get_prediction(sm.add_constant(g["year"])).summary_frame()
+         fig.add_trace(go.Scatter(x=g["year"], y=g["cfr"], mode="markers",
+                                  name=f"{country} (obs)"))
+         fig.add_trace(go.Scatter(x=g["year"], y=pred["mean"], mode="lines",
+                                  name=f"{country} (fit)"))
+         fig.add_trace(go.Scatter(
+             x=list(g["year"]) + list(g["year"][::-1]),
+             y=list(pred["mean_ci_upper"]) + list(pred["mean_ci_lower"][::-1]),
+             fill="toself", fillcolor="rgba(0,0,0,0.08)",
+             line_color="rgba(0,0,0,0)", showlegend=False,
+         ))
+     fig.update_layout(title="Case fatality rate trend", xaxis_title="Year",
+                       yaxis_title="CFR (%)", height=450)
+     return {"slopes": slopes}, fig
+     ```
+- **Gotchas**: only DRC clears the 3-year bar — say so in the UI rather than
+  forcing a "trend" on 2-point countries (two points have zero residual
+  degrees of freedom and an undefined CI). `year` is integer; no Timestamp
+  conversion needed.
+- **Acceptance check**: DRC's slope is negative; the band is visibly wide given
+  only ~5 points.
 
 ### 2.3 Monthly cases short-horizon forecast
 
-- **Input**: `ebola_monthly_trends.csv` (10 rows total — illustrative only)
+- **Input**: `loaders.load_monthly_trends()` — `date` column already built.
+- **Output**: `models.monthly_forecast(monthly: pd.DataFrame, country: str =
+  "Democratic Republic of the Congo", horizon: int = 3) -> tuple[dict, go.Figure]`.
 - **Steps**:
-  1. Pick **one country** with the most rows (DRC has the most monthly entries).
-  2. Build a date index: `pd.to_datetime(df.year.astype(str) + "-" +
-     df.month.astype(str) + "-01")`.
-  3. **Model A — exponential smoothing**:
-     `statsmodels.tsa.holtwinters.SimpleExpSmoothing(series).fit()`.
-  4. **Model B — Prophet** (optional): only if you want to demonstrate uncertainty
-     bands. Set `interval_width=0.95` so the bands look appropriately wide.
-  5. **Present**: line chart of observed + 3-month forecast with confidence band.
-- **Acceptance check**: the band is wide enough that the user reading it immediately
-  understands "this is illustrative." If the band looks tight, the chart is lying.
+  1. Slice to one country and order by date:
+     ```python
+     s = monthly[monthly["country"] == country].sort_values("date")
+     y = s["confirmed_cases"].astype(float).to_numpy()
+     ```
+  2. Fit simple exponential smoothing and forecast; build an approximate band
+     from the residual spread (SES has no native interval):
+     ```python
+     from statsmodels.tsa.holtwinters import SimpleExpSmoothing
+
+     fit = SimpleExpSmoothing(y, initialization_method="estimated").fit()
+     fc = fit.forecast(horizon)
+     resid_std = np.std(fit.resid, ddof=1) if len(y) > 1 else float(y.std() or 1)
+     upper = fc + 1.96 * resid_std
+     lower = np.clip(fc - 1.96 * resid_std, 0, None)
+     ```
+  3. Build future month labels **as strings** (kaleido-safe) and plot:
+     ```python
+     last = s["date"].iloc[-1]
+     future = pd.date_range(last + pd.offsets.MonthBegin(1),
+                            periods=horizon, freq="MS")
+     obs_x = s["date"].dt.strftime("%Y-%m-%d")
+     fc_x = future.strftime("%Y-%m-%d")
+
+     fig = go.Figure()
+     fig.add_trace(go.Scatter(x=obs_x, y=y, mode="lines+markers", name="observed"))
+     fig.add_trace(go.Scatter(x=fc_x, y=fc, mode="lines+markers",
+                              line_dash="dash", name="forecast"))
+     fig.add_trace(go.Scatter(
+         x=list(fc_x) + list(fc_x[::-1]),
+         y=list(upper) + list(lower[::-1]),
+         fill="toself", fillcolor="rgba(214,39,40,0.15)",
+         line_color="rgba(0,0,0,0)", name="≈95% band",
+     ))
+     fig.update_layout(title=f"{country}: monthly cases + {horizon}-month forecast",
+                       height=450)
+     return {"forecast": fc.tolist()}, fig
+     ```
+- **Gotchas**: this series is **sparse and irregularly spaced** (DRC has entries
+  in 2018-08, 2019-01, 2022-05/06, 2026-05) — SES essentially extrapolates the
+  last level. Acceptable *only* as a methodology demo; the wide band is the
+  honest part of the chart. Prophet is overkill here and won't fit < 2 cycles.
+- **Acceptance check**: the forecast line is roughly flat at the last observed
+  level and the shaded band is wide relative to the point forecast.
 
 ### 2.4 Outbreak severity regression
 
-- **Input**: `ebola_outbreaks.csv` (7 rows)
+- **Input**: `loaders.load_outbreaks()` — `who_emergency` (bool) already present.
+- **Output**: `models.severity_regression(outbreaks: pd.DataFrame) -> tuple[dict,
+  go.Figure]`.
 - **Steps**:
-  1. Features: decade (from `start_date`), `virus_species` (one-hot),
-     `who_emergency_status` (binary), country group.
-  2. Targets: `cases` (log-transformed) and `deaths` (log-transformed) — fit
-     separately.
-  3. Model: `sklearn.linear_model.Ridge(alpha=1.0)` (regularize given n=7).
-  4. **Validate**: leave-one-out; report MAE in log space. Do **not** report R².
-  5. **Present**: predicted vs. actual scatter with the diagonal `y=x` overlaid.
-- **Acceptance check**: WHO-emergency outbreaks predict to larger case counts; the
-  scatter is a sanity demo, not a benchmark.
+  1. Keep features minimal (n=7) and log-transform the heavy-tailed target:
+     ```python
+     df = outbreaks.copy()
+     df["decade"] = df["start_date"].dt.year // 10 * 10
+     df["is_ebov"] = (df["virus_species"] == "Ebola virus").astype(int)
+     df["emergency"] = df["who_emergency"].astype(int)
+     X = df[["decade", "is_ebov", "emergency"]].astype(float)
+     y = np.log10(df["cases"])
+     ```
+  2. Ridge (regularized for the tiny n) with leave-one-out:
+     ```python
+     from sklearn.linear_model import Ridge
+     from sklearn.model_selection import LeaveOneOut, cross_val_predict
+     from sklearn.metrics import mean_absolute_error
+
+     y_pred = cross_val_predict(Ridge(alpha=1.0), X, y, cv=LeaveOneOut())
+     mae = mean_absolute_error(y, y_pred)
+     ```
+  3. **Present** — predicted-vs-actual with a `y = x` reference (numeric axes):
+     ```python
+     lims = [min(y.min(), y_pred.min()), max(y.max(), y_pred.max())]
+     fig = go.Figure()
+     fig.add_trace(go.Scatter(x=y, y=y_pred, mode="markers",
+                              text=df["country"], name="outbreaks"))
+     fig.add_trace(go.Scatter(x=lims, y=lims, mode="lines",
+                              line_dash="dot", name="y = x"))
+     fig.update_layout(
+         title=f"Severity regression — LOO MAE = {mae:.2f} (log10 cases)",
+         xaxis_title="Actual log10(cases)",
+         yaxis_title="Predicted log10(cases)", height=450)
+     return {"loo_mae_log10": round(mae, 3)}, fig
+     ```
+- **Gotchas**: 3 features / 7 rows is already near the limit — don't one-hot all
+  species (that alone is 4–5 columns). Report MAE in log space; **never** R² at
+  this n. The fit is a sanity demo, not a benchmark.
+- **Acceptance check**: points track the diagonal loosely; the large epidemics
+  (2014–2016, 2018–2020) sit at the high-cases end and the small flare-ups
+  cluster low.
 
 ### 2.5 Outbreak duration model (optional / stretch)
 
-- **Input**: `ebola_outbreaks.csv`
+- **Input**: `loaders.load_outbreaks()` — `duration_days` precomputed.
+- **Output**: `models.duration_model(outbreaks: pd.DataFrame) -> tuple[dict,
+  go.Figure]`.
 - **Steps**:
-  1. Compute `duration_days = (end_date - start_date).dt.days`.
-  2. Regress `duration_days ~ year + cases + who_emergency_status`.
-  3. Plot duration vs. start year, colored by emergency status.
-- **Acceptance check**: post-2015 outbreaks have shorter durations on average (this
-  is the story — improved response time).
+  1. Drop rows with no end date, then fit a quick OLS for the headline numbers:
+     ```python
+     import statsmodels.api as sm
+
+     df = outbreaks.dropna(subset=["duration_days"]).copy()
+     df["year"] = df["start_date"].dt.year
+     df["emergency"] = df["who_emergency"].astype(int)
+     model = sm.OLS(df["duration_days"],
+                    sm.add_constant(df[["year", "cases", "emergency"]])).fit()
+     ```
+  2. **Present** — duration vs. start year, colored by emergency status:
+     ```python
+     df["status"] = np.where(df["emergency"] == 1, "WHO emergency", "Contained")
+     fig = go.Figure()
+     for status, g in df.groupby("status"):
+         fig.add_trace(go.Scatter(
+             x=g["year"], y=g["duration_days"], mode="markers+text",
+             text=g["country"], textposition="top center", name=status,
+             marker_size=12))
+     fig.update_layout(title="Outbreak duration vs. start year",
+                       xaxis_title="Start year",
+                       yaxis_title="Duration (days)", height=450)
+     return {"coefs": model.params.round(2).to_dict()}, fig
+     ```
+- **Gotchas**: `duration_days` needs a parsed `end_date`; the 2026 row has one
+  (`2026-05-17`) so it's included. `year` is integer — no Timestamp conversion.
+- **Acceptance check**: the long-running outbreaks are the **WHO-emergency** ones
+  (2014–2016 ≈ 555 days, 2018–2020 ≈ 694 days), while the contained flare-ups
+  (2021, 2022) sit near ~80–110 days — i.e. severity, not recency, drives length.
 
 ## Phase 3 — Dashboard integration (2–3 hours)
 
@@ -422,23 +616,36 @@ step is the chart you add to the dashboard **and** save to `results/` via
    ```
 2. **Render and save in one step**. Wrap each figure builder so the
    `save_figure` call runs once per data change instead of on every Streamlit
-   rerun:
+   rerun. Phase 1 chart functions return a `Figure`; Phase 2 model functions
+   return `(metrics, fig)`, so use two helpers:
    ```python
    @st.cache_data(show_spinner=False)
-   def build_and_save(name: str, _builder, *args) -> go.Figure:
+   def chart(name: str, _builder, *args) -> go.Figure:
        fig = _builder(*args)
        save_figure(fig, name)
        return fig
 
-   fig = build_and_save("outbreak_gantt", outbreak_gantt, outbreaks_df)
-   st.plotly_chart(fig, use_container_width=True)
+   @st.cache_data(show_spinner=False)
+   def model(name: str, _builder, *args) -> tuple[dict, go.Figure]:
+       metrics, fig = _builder(*args)
+       save_figure(fig, name)
+       return metrics, fig
+
+   st.plotly_chart(chart("outbreak_gantt", outbreak_gantt, outbreaks_df),
+                   use_container_width=True)
    ```
    Use the `name` values from the Phase 1 and Phase 2 tables verbatim.
-3. **Tab 1 (Explore)**: render charts 1.1 → 1.6 via `build_and_save`. Put
+3. **Tab 1 (Explore)**: render charts 1.1 → 1.6 via `chart(...)`. Put
    `st.selectbox` filters for country/year above the relevant charts.
-4. **Tab 2 (Methodology demo)**: render models 2.1 → 2.3 via `build_and_save`.
-   Every model gets a
-   `st.warning("Demonstration only — n is too small for operational use.")` banner.
+4. **Tab 2 (Methodology demo)**: render models 2.1 → 2.3 via `model(...)`,
+   unpacking both halves — show the figure and surface the metrics:
+   ```python
+   st.warning("Demonstration only — n is too small for operational use.")
+   metrics, fig = model("outcome_classifier_coefs", outcome_classifier, clinical_df)
+   st.plotly_chart(fig, use_container_width=True)
+   st.json(metrics)
+   ```
+   Every model gets its own caveat banner.
 5. **Tab 3 (About)**: render `ebola_virus_facts.csv` and `ebola_virus_species.csv`
    as reference tables, plus a paragraph describing data sources and limitations.
 6. **Run locally**: `streamlit run main.py`. After the first load, confirm
@@ -453,6 +660,8 @@ step is the chart you add to the dashboard **and** save to `results/` via
                         load_monthly_trends)
    from charts import (outbreak_gantt, cfr_vs_size, cumulative_deaths,
                        bubble_map, symptom_cooccurrence, transmission_lollipop)
+   from models import (outcome_classifier, cfr_trend, monthly_forecast,
+                       severity_regression, duration_model)
    from utils import save_figure
 
    outbreaks = load_outbreaks()
@@ -470,8 +679,12 @@ step is the chart you add to the dashboard **and** save to `results/` via
    save_figure(transmission_lollipop(load_transmission_factors()),
                "transmission_lollipop")
 
-   # Append Phase 2 model figures here as you build them, using the names
-   # from the Phase 2 table.
+   # Phase 2 models return (metrics, fig) — keep the figure half:
+   save_figure(outcome_classifier(load_clinical())[1], "outcome_classifier_coefs")
+   save_figure(cfr_trend(yearly)[1], "cfr_trend")
+   save_figure(monthly_forecast(load_monthly_trends())[1], "monthly_forecast")
+   save_figure(severity_regression(outbreaks)[1], "severity_regression")
+   save_figure(duration_model(outbreaks)[1], "duration_model")
    ```
    Run with `python ebola/generate_results.py`.
 
@@ -500,8 +713,8 @@ step is the chart you add to the dashboard **and** save to `results/` via
 - Methodology demo tab has at least the patient outcome classifier and one
   time-series forecast, each with a visible caveat banner.
 - The data dictionary is reachable from the About tab.
-- `loaders.py`, `charts.py`, and `utils.py` exist as separate modules;
-  `main.py` only does layout, not data work.
+- `loaders.py`, `charts.py`, `models.py`, and `utils.py` exist as separate
+  modules; `main.py` only does layout, not data work.
 - `ebola/results/` contains an `.html` and a `.png` for every filename listed in
   the Phase 1 and Phase 2 tables.
 - `python ebola/generate_results.py` regenerates every file in `results/`
