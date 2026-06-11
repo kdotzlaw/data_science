@@ -367,6 +367,12 @@ only pull in what you use.
 
 ### 2.1 Patient outcome classifier (start here — most defensible result)
 
+- **Purpose**: Identify *which clinical factors push a patient toward death*. Fits
+  a logistic regression on the 10-patient clinical records (age, incubation,
+  severity, ICU, ventilation) and presents the standardized coefficients as a bar
+  chart, so you can read the direction and relative strength of each risk factor.
+  The deliverable is interpretability, not prediction — validated by leave-one-out
+  accuracy and a confusion matrix, never AUC.
 - **Input**: `loaders.load_clinical()` — `deceased` (0/1) target already present;
   `symptom_list` already split if you want symptom features.
 - **Output**: `models.outcome_classifier(df: pd.DataFrame) -> tuple[dict, go.Figure]`.
@@ -422,9 +428,26 @@ only pull in what you use.
   accuracy + confusion matrix, never AUC.
 - **Acceptance check**: `severity`, `icu_admission`, and `mechanical_ventilation`
   are the largest positive (deceased-direction) bars.
+  > **Observed mismatch (2026-06-11)**: the actual fit does *not* match this
+  > expectation. Top positive bars come out `age` (+0.82) > `severity` (+0.76) >
+  > `icu_admission` = `mechanical_ventilation` (+0.49 each); `incubation_days` is
+  > the lone negative bar. Two reasons, both data — not a code bug: (1) `age` is a
+  > clean monotonic signal (the 3 deceased are the 3 oldest) and as a granular
+  > continuous feature absorbs the most standardized weight; (2) `icu_admission`
+  > and `mechanical_ventilation` are **perfectly collinear** in this dataset
+  > (identical columns), so logistic regression splits their shared effect in half
+  > rather than ranking either near the top. LOO accuracy = 0.90, confusion matrix
+  > `[[6, 1], [0, 3]]`. To make `icu`/`mech` rank as this check expects, collapse
+  > the collinear pair into a single feature — a modeling change, not a fix to the
+  > chart, which faithfully renders the model as specified.
 
 ### 2.2 CFR trend by country (linear with CI band)
 
+- **Purpose**: Ask *whether a country's case fatality rate is rising or falling
+  over time*. Fits a simple linear regression of CFR against year (only DRC has
+  the ≥3 distinct years needed) and plots the observed points, the fitted line,
+  and a confidence band — the deliberately wide band being the honest signal that
+  the trend rests on very few data points.
 - **Input**: `loaders.load_country_yearly()`.
 - **Output**: `models.cfr_trend(yearly: pd.DataFrame) -> tuple[dict, go.Figure]`.
 - **Steps**:
@@ -472,6 +495,12 @@ only pull in what you use.
 
 ### 2.3 Monthly cases short-horizon forecast
 
+- **Purpose**: Demonstrate *near-term case forecasting* on a single country's
+  monthly series. Fits simple exponential smoothing and projects 3 months ahead
+  with an approximate uncertainty band. Because the series is sparse and irregular,
+  the forecast is essentially flat at the last level — the point is to show
+  forecasting *methodology* (and honest uncertainty), not to make an operational
+  prediction.
 - **Input**: `loaders.load_monthly_trends()` — `date` column already built.
 - **Output**: `models.monthly_forecast(monthly: pd.DataFrame, country: str =
   "Democratic Republic of the Congo", horizon: int = 3) -> tuple[dict, go.Figure]`.
@@ -523,6 +552,12 @@ only pull in what you use.
 
 ### 2.4 Outbreak severity regression
 
+- **Purpose**: Test *how well outbreak size can be predicted from basic
+  attributes* (decade, virus species, WHO-emergency status). Fits a regularized
+  Ridge regression on the 7 outbreaks to predict log-scale case counts, shown as a
+  predicted-vs-actual plot against a `y = x` reference line. It's a sanity demo of
+  fit quality (reported as log-space MAE), confirming large epidemics land high and
+  small flare-ups cluster low.
 - **Input**: `loaders.load_outbreaks()` — `who_emergency` (bool) already present.
 - **Output**: `models.severity_regression(outbreaks: pd.DataFrame) -> tuple[dict,
   go.Figure]`.
