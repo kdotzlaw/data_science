@@ -5,9 +5,9 @@ import statsmodels.api as sm
 
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import LeaveOneOut, cross_val_predict
-from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.metrics import accuracy_score, confusion_matrix, mean_absolute_error
 
 from statsmodels.tsa.holtwinters import SimpleExpSmoothing
 
@@ -243,6 +243,40 @@ ACCEPTANCE CHECK:
 def severity_regression(outbreaks: pd.DataFrame) -> tuple[dict,go.Figure]:
     
     # log transform heavy-tailed targets (keep features minimal n=7)
+    df = outbreaks.copy()
+    df['decade'] = df['start_date'].dt.year // 10 * 10
+    df['is_ebov'] = (df['virus_species']=='Ebola virus').astype(int)
+    df['emergency'] = df['who_emergency'].astype(int)
+    
+    X = df[['decade','is_ebov','emergency']].astype(float)
+    y = np.log10(df['cases'])
 
     # use ridge regularization for the tiny n with leave-one-out
-    return
+    yPred = cross_val_predict(Ridge(alpha=1.0), X, y,cv=LeaveOneOut())
+    mae = mean_absolute_error(y,yPred)
+
+    lims = [min(y.min(),yPred.min()),max(y.max(),yPred.max())]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=y,
+        y=yPred,
+        mode='markers',
+        text=df['country'],
+        name='outbreaks'
+    ))
+    fig.add_trace(go.Scatter(
+        x=lims,
+        y=lims,
+        mode='lines',
+        line_dash='dot',
+        name='y=x'
+    ))
+    fig.update_layout(
+        title=f"Severity Regression -- LOO MAE = {mae:.2f} (log10 cases)",
+        xaxis_title='Actual log10(cases)',
+        yaxis_title='Predicted log10(cases)',
+        height=450
+    )
+
+    return {'loo_mae_log10':round(mae,3)}, fig

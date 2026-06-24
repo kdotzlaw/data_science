@@ -1,7 +1,7 @@
 from loaders import load_outbreaks, load_country_yearly, load_outbreak_timeline, load_master,load_clinical,load_transmission_factors, load_monthly_trends
 from charts import outbreak_gantt, cfr_vs_size, cumulative_deaths, bubble_map,symptom_coocurrance,transmission_lollipop
 from utils import save_figure
-from models import outcome_classifier, cfr_trend, monthly_forecast
+from models import outcome_classifier, cfr_trend, monthly_forecast, severity_regression
 
 if __name__=='__main__':
 
@@ -49,3 +49,7 @@ if __name__=='__main__':
     print(res[0])
     save_figure(res[1],'monthly_forecast_DRC')
     '''
+
+    res = severity_regression(load_outbreaks())
+    print(res[0])
+    save_figure(res[1],'severity_regression')
