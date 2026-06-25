@@ -1,5 +1,5 @@
 from loaders import load_outbreaks, load_country_yearly, load_outbreak_timeline, load_master,load_clinical,load_transmission_factors, load_monthly_trends
-from charts import outbreak_gantt, cfr_vs_size, cumulative_deaths, bubble_map,symptom_coocurrance,transmission_lollipop
+from charts import outbreak_gantt, cfr_vs_size, cumulative_deaths, bubble_map,symptom_cooccurance,transmission_lollipop
 from utils import save_figure
 from models import outcome_classifier, cfr_trend, monthly_forecast, severity_regression
 
@@ -26,7 +26,7 @@ if __name__=='__main__':
     '''
 
     '''test symptom coocurrance
-    fig = symptom_coocurrance(load_clinical())
+    fig = symptom_cooccurance(load_clinical())
     save_figure(fig,'symptom_cooccurance')
     '''
 

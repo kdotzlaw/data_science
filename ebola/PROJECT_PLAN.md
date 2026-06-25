@@ -245,7 +245,7 @@ import plotly.graph_objects as go
 ### 1.5 Symptom co-occurrence heatmap
 
 - **Input**: `loaders.load_clinical()` — `symptom_list` column already split.
-- **Output**: `charts.symptom_cooccurrence(df: pd.DataFrame) -> go.Figure`.
+- **Output**: `charts.symptom_cooccurance(df: pd.DataFrame) -> go.Figure`.
 - **Steps**:
   1. Build a patient × symptom binary matrix:
      ```python
@@ -639,89 +639,360 @@ only pull in what you use.
 
 ## Phase 3 — Dashboard integration (2–3 hours)
 
-1. **Structure** `main.py`:
-   ```python
-   import streamlit as st
-   from loaders import *
-   from charts import *
-   from utils import save_figure
+By this point `loaders.py`, `charts.py`, `models.py`, and `utils.py` all exist and
+are individually verified (Phases 1–2). Phase 3 is **pure wiring**: `main.py` only
+loads data, lays out three tabs, and calls the existing builders. It must not
+contain any data cleaning or figure-construction logic — if you find yourself
+reaching for `pandas` in `main.py`, that code belongs in a loader or chart module.
 
-   st.set_page_config(page_title="Ebola Data Explorer", layout="wide")
-   tab1, tab2, tab3 = st.tabs(["Explore", "Methodology demo", "About"])
-   ```
-2. **Render and save in one step**. Wrap each figure builder so the
-   `save_figure` call runs once per data change instead of on every Streamlit
-   rerun. Phase 1 chart functions return a `Figure`; Phase 2 model functions
-   return `(metrics, fig)`, so use two helpers:
-   ```python
-   @st.cache_data(show_spinner=False)
-   def chart(name: str, _builder, *args) -> go.Figure:
-       fig = _builder(*args)
-       save_figure(fig, name)
-       return fig
+Each step below lists **goal**, **steps**, **gotchas** (specific to *this*
+codebase — real name mismatches and import gaps you will hit), and an
+**acceptance check**.
 
-   @st.cache_data(show_spinner=False)
-   def model(name: str, _builder, *args) -> tuple[dict, go.Figure]:
-       metrics, fig = _builder(*args)
-       save_figure(fig, name)
-       return metrics, fig
+`main.py` already contains the page config, the `tab1/tab2/tab3` split, and the
+`chart()` / `model()` cache wrappers (3.3 below). Steps 3.1–3.2 reconcile its
+imports; 3.4–3.6 fill the tab bodies; 3.7–3.8 add the headless generator and
+verify the whole phase.
 
-   st.plotly_chart(chart("outbreak_gantt", outbreak_gantt, outbreaks_df),
-                   use_container_width=True)
-   ```
-   Use the `name` values from the Phase 1 and Phase 2 tables verbatim.
-3. **Tab 1 (Explore)**: render charts 1.1 → 1.6 via `chart(...)`. Put
-   `st.selectbox` filters for country/year above the relevant charts.
-4. **Tab 2 (Methodology demo)**: render models 2.1 → 2.3 via `model(...)`,
-   unpacking both halves — show the figure and surface the metrics:
-   ```python
-   st.warning("Demonstration only — n is too small for operational use.")
-   metrics, fig = model("outcome_classifier_coefs", outcome_classifier, clinical_df)
-   st.plotly_chart(fig, use_container_width=True)
-   st.json(metrics)
-   ```
-   Every model gets its own caveat banner.
-5. **Tab 3 (About)**: render `ebola_virus_facts.csv` and `ebola_virus_species.csv`
-   as reference tables, plus a paragraph describing data sources and limitations.
-6. **Run locally**: `streamlit run main.py`. After the first load, confirm
-   `results/` contains one `.html` and one `.png` per filename in the tables.
-7. **Headless batch alternative** — add `ebola/generate_results.py` so figures
-   can be refreshed without launching Streamlit (useful for CI or for emailing a
-   static snapshot):
-   ```python
-   from loaders import (load_outbreaks, load_country_yearly,
-                        load_outbreak_timeline, load_master,
-                        load_clinical, load_transmission_factors,
-                        load_monthly_trends)
-   from charts import (outbreak_gantt, cfr_vs_size, cumulative_deaths,
-                       bubble_map, symptom_cooccurrence, transmission_lollipop)
-   from models import (outcome_classifier, cfr_trend, monthly_forecast,
-                       severity_regression, duration_model)
-   from utils import save_figure
+### 3.1 Reconcile `main.py` imports (do this first — two real gaps)
 
-   outbreaks = load_outbreaks()
-   save_figure(outbreak_gantt(outbreaks), "outbreak_gantt")
-   save_figure(cfr_vs_size(outbreaks), "cfr_vs_size")
+- **Goal**: make every builder Tab 2 needs importable, and stop relying on a
+  transitive `go` import.
+- **Steps**: the current header is
+  ```python
+  import streamlit as st
+  from loaders import *
+  from charts import *
+  from utils import save_figure
+  ```
+  Add the two missing pieces:
+  ```python
+  import plotly.graph_objects as go     # the chart()/model() return annotations use go.*
+  from models import *                  # Tab 2 calls outcome_classifier, cfr_trend, ...
+  ```
+- **Gotchas**:
+  - **`go` is currently only in scope by accident** — `from charts import *`
+    happens to re-export `go`, so the `-> go.Figure` annotations in the wrappers
+    evaluate. Import `go` explicitly so a future edit to `charts.py` can't break
+    `main.py`.
+  - **`models` is not imported at all yet.** Without `from models import *`,
+    Tab 2's `model("outcome_classifier_coefs", outcome_classifier, ...)` raises
+    `NameError: outcome_classifier`. This is the first thing that will break when
+    you wire Tab 2.
+  - `from X import *` pulls each module's own imports (`np`, `pd`, `px`, `go`)
+    into `main.py`'s namespace too. That's fine here, but it means name
+    collisions are silent — keep `main.py` short so they stay visible.
+- **Acceptance check**: `python -c "import main"` (or just launching Streamlit)
+  imports with no `NameError` / `ImportError`.
 
-   yearly = load_country_yearly()
-   timeline = load_outbreak_timeline()
-   save_figure(cumulative_deaths(yearly, timeline), "cumulative_deaths")
+### 3.2 Load every DataFrame once, cached
 
-   master = load_master()
-   save_figure(bubble_map(master, yearly), "bubble_map")
+- **Goal**: one cached load per CSV, reused across reruns and across tabs, so the
+  `chart()`/`model()` cache keys stay stable.
+- **Steps**: right after the wrappers, load what the tabs need. Wrap the bare
+  loaders so Streamlit caches the DataFrames (the loaders themselves stay
+  Streamlit-free per Phase 0):
+  ```python
+  load = st.cache_data(show_spinner=False)
 
-   save_figure(symptom_cooccurrence(load_clinical()), "symptom_cooccurrence")
-   save_figure(transmission_lollipop(load_transmission_factors()),
-               "transmission_lollipop")
+  outbreaks   = load(load_outbreaks)()
+  yearly      = load(load_country_yearly)()
+  timeline    = load(load_outbreak_timeline)()
+  master      = load(load_master)()
+  clinical    = load(load_clinical)()
+  transmission = load(load_transmission_factors)()
+  monthly     = load(load_monthly_trends)()
+  species     = load(load_virus_species)()
+  facts       = load(load_virus_facts)()
+  data_dict   = load(load_data_dictionary)()
+  ```
+- **Gotchas**:
+  - `st.cache_data` hashes the **positional args** of `chart()`/`model()`, which
+    include these DataFrames. Loading them through one cached call gives each a
+    stable identity, so the figure cache only busts when the underlying CSV
+    actually changes — exactly the "save once per data change" behaviour Step 3.3
+    promises. Re-reading a CSV inline on every rerun would defeat that.
+  - Don't pre-filter here. Tab-level `st.selectbox` filtering (3.4) happens at the
+    call site so the cache key reflects the filter.
+- **Acceptance check**: `load_all()`-equivalent shapes print without error; the
+  app's first paint reads each CSV once (subsequent reruns hit cache).
 
-   # Phase 2 models return (metrics, fig) — keep the figure half:
-   save_figure(outcome_classifier(load_clinical())[1], "outcome_classifier_coefs")
-   save_figure(cfr_trend(yearly)[1], "cfr_trend")
-   save_figure(monthly_forecast(load_monthly_trends())[1], "monthly_forecast")
-   save_figure(severity_regression(outbreaks)[1], "severity_regression")
-   save_figure(duration_model(outbreaks)[1], "duration_model")
-   ```
-   Run with `python ebola/generate_results.py`.
+### 3.3 The `chart()` / `model()` render-and-save wrappers (already in `main.py`)
+
+- **Goal**: render a figure **and** drop its `.html` + `.png` into `results/`
+  exactly once per data change, not on every rerun.
+- **Steps**: these are already written — confirm they match and understand why:
+  ```python
+  @st.cache_data(show_spinner=False)
+  def chart(name: str, _builder, *args) -> go.Figure:
+      fig = _builder(*args)
+      save_figure(fig, name)
+      return fig
+
+  @st.cache_data(show_spinner=False)
+  def model(name: str, _builder, *args) -> tuple[dict, go.Figure]:
+      metrics, fig = _builder(*args)
+      save_figure(fig, name)
+      return metrics, fig
+  ```
+  Phase 1 builders return a bare `Figure`; Phase 2 builders return
+  `(metrics, fig)` — that's why there are two wrappers.
+- **Gotchas**:
+  - The leading underscore in `_builder` tells `st.cache_data` **not** to hash the
+    function object (unhashable) — only `name` and `*args` form the key. Keep the
+    underscore.
+  - Pass the `name` strings **verbatim** from the Phase 1 / Phase 2 tables; they
+    are the saved filenames and the Definition-of-Done checklist greps for them.
+  - `save_figure` calls kaleido for the PNG — the *first* render of each figure
+    takes a couple of seconds. That cost is paid once per cache key, not per
+    rerun.
+- **Acceptance check**: rendering any chart twice (rerun the app) writes the PNG
+  only on the first pass; the second pass is a cache hit (no spinner, no file
+  mtime change).
+
+### 3.4 Tab 1 — Explore (charts 1.1 → 1.6)
+
+- **Goal**: six interactive charts with hover context, plus a country/year filter
+  where it adds value.
+- **Steps**: inside `with tab1:` render each chart through `chart(...)`, using the
+  **actual** function names and the loaded frames:
+  ```python
+  with tab1:
+      st.plotly_chart(chart("outbreak_gantt", outbreak_gantt, outbreaks),
+                      use_container_width=True)
+      st.plotly_chart(chart("cfr_vs_size", cfr_vs_size, outbreaks),
+                      use_container_width=True)
+      st.plotly_chart(chart("cumulative_deaths", cumulative_deaths, yearly, timeline),
+                      use_container_width=True)
+      st.plotly_chart(chart("bubble_map", bubble_map, master, yearly),
+                      use_container_width=True)
+      st.plotly_chart(chart("symptom_cooccurrence", symptom_cooccurance, clinical),
+                      use_container_width=True)
+      st.plotly_chart(chart("transmission_lollipop", transmission_lollipop, transmission),
+                      use_container_width=True)
+  ```
+  The block above is the **baseline, no-filter render**. Two of the six charts
+  benefit from a filter (`cumulative_deaths`, `transmission_lollipop`); the
+  **Filters** subsection below replaces their plain calls. Leave the other four
+  alone.
+
+  **Filters (where applicable).** Add a widget only where the chart carries
+  enough series/categories that hiding some *improves* readability, **and** the
+  narrowed view is still meaningful. Apply that test to all six:
+
+  | Chart | Filter on | Widget | Verdict |
+  |---|---|---|---|
+  | 1.3 `cumulative_deaths` | `country` | `st.multiselect` | **yes** — many country lines; isolating 1–3 is the main use |
+  | 1.6 `transmission_lollipop` | `factor_category` | `st.multiselect` | **yes** — categories group cleanly; a one-category view still reads |
+  | 1.2 `cfr_vs_size` | `decade` | `st.multiselect` | optional — n=7, so a filter only thins an already-sparse scatter |
+  | 1.1 `outbreak_gantt` | — | — | no — the complete record *is* the point; 7 bars, nothing to hide |
+  | 1.4 `bubble_map` | — | — | no — a continent overview; filtering defeats the geographic story |
+  | 1.5 `symptom_cooccurance` | — | — | no — n=10 patients; any split leaves the matrix too sparse to read |
+
+  **Keep saved artifacts on full data.** `chart(name, ...)` writes
+  `results/<name>.png` for every distinct cache key. Push a *filtered* frame
+  through it and the last selection silently overwrites the canonical PNG, so the
+  Definition-of-Done files stop reflecting the full dataset. Split the two paths:
+  render the **saved** figure with `chart()` only when the filter sits at its
+  "all" default, and render every narrowed view through a **non-saving** helper:
+
+  ```python
+  @st.cache_data(show_spinner=False)
+  def view(_builder, *args) -> go.Figure:
+      """Filtered / interactive render — never writes to results/."""
+      return _builder(*args)
+  ```
+
+  Wire `cumulative_deaths` with a country multiselect (default = every country,
+  which is the path that saves the artifact):
+
+  ```python
+  countries = sorted(yearly["country"].unique())
+  picked = st.multiselect("Countries", countries, default=countries,
+                          key="cumdeaths_countries")
+  if not picked:                                   # empty selection → nothing to plot
+      st.info("Pick at least one country.")
+  else:
+      if set(picked) == set(countries):
+          fig = chart("cumulative_deaths", cumulative_deaths, yearly, timeline)  # saves
+      else:
+          sub = yearly[yearly["country"].isin(picked)]
+          fig = view(cumulative_deaths, sub, timeline)                          # no save
+      st.plotly_chart(fig, use_container_width=True)
+  ```
+
+  Same shape for `transmission_lollipop` on `factor_category`:
+
+  ```python
+  cats = sorted(transmission["factor_category"].unique())
+  picked = st.multiselect("Risk categories", cats, default=cats, key="lollipop_cats")
+  if picked:
+      if set(picked) == set(cats):
+          fig = chart("transmission_lollipop", transmission_lollipop, transmission)
+      else:
+          fig = view(transmission_lollipop,
+                     transmission[transmission["factor_category"].isin(picked)])
+      st.plotly_chart(fig, use_container_width=True)
+  ```
+
+  For *year* ranges and one-off series hiding, prefer Plotly's built-ins — drag to
+  zoom, and click a legend entry to toggle that series — over a Streamlit widget.
+  Those act client-side with no rerun and never re-save the figure, so they cost
+  nothing and can't touch `results/`.
+  
+- **Gotchas**:
+  - **Function name ≠ save-`name` — still a one-word mismatch.** The function in
+    `charts.py` is **`symptom_cooccurance`** (`-urance`), while the save-`name`
+    filename string is `"symptom_cooccurrence"` (`-urrence`, per the Phase 1
+    table). The call above pairs the real function with the filename string on
+    purpose — the filename is just a label and is left unchanged so existing
+    `results/` artifacts stay stable. Don't "fix" the string to match the
+    function unless you also rename every `results/symptom_cooccurrence.*` file.
+  - `cumulative_deaths` and `bubble_map` are the only two-arg charts — passing a
+    single frame raises a `TypeError`. Mirror the signatures from `charts.py`
+    exactly.
+  - **Filtering through `chart()` clobbers the saved PNG.** A narrowed frame is a
+    new cache key but the *same* `name`, so `save_figure` overwrites
+    `results/<name>.*` with the filtered view. Route filtered renders through the
+    non-saving `view()` helper (see the Filters subsection) so the canonical
+    artifact always reflects full data.
+- **Acceptance check**: all six charts render; hovering shows tooltips; the
+  Explore tab satisfies the "at least four working charts with hover context"
+  bar in the Definition of Done.
+
+### 3.5 Tab 2 — Methodology demo (models 2.1 → 2.5)
+
+- **Goal**: render each model's figure with its metrics surfaced and a
+  per-model caveat banner.
+- **Steps**: all five models now exist (Phases 2.1–2.5), so render them all.
+  Factor out the repeated unpack-render-caveat into a small local helper:
+  ```python
+  with tab2:
+      st.warning("Demonstration only — n is tiny (≤10 rows per model). "
+                 "These are methodology demos, not operational predictions.")
+
+      def demo(name, builder, *args, caption=""):
+          metrics, fig = model(name, builder, *args)
+          st.plotly_chart(fig, use_container_width=True)
+          if caption:
+              st.caption(caption)
+          st.json(metrics)
+
+      demo("outcome_classifier_coefs", outcome_classifier, clinical,
+           caption="LOO accuracy + confusion matrix only — never AUC at n=10.")
+      demo("cfr_trend", cfr_trend, yearly,
+           caption="Only DRC clears the ≥3-distinct-years bar; band is wide on purpose.")
+      demo("monthly_forecast", monthly_forecast, monthly,
+           caption="SES on a sparse, irregular series — extrapolates the last level.")
+      demo("severity_regression", severity_regression, outbreaks,
+           caption="MAE in log10 space; a sanity demo, not a benchmark.")
+      demo("duration_model", duration_model, outbreaks,
+           caption="Severity (WHO-emergency), not recency, drives length.")
+  ```
+- **Gotchas**:
+  - The original plan only promised 2.1 → 2.3 here; 2.4 and 2.5 are built now, so
+    include them. The Definition of Done still only *requires* the classifier +
+    one forecast, but rendering all five is free once they're wired.
+  - `model()` returns `(metrics, fig)` — unpack in that order. Feeding a
+    `model()` result into `st.plotly_chart` without unpacking renders nothing
+    useful.
+  - `st.json(metrics)` will choke on numpy types if any leak through; the model
+    functions already return plain Python (`round(...)`, `.tolist()`), so keep it
+    that way if you edit them.
+- **Acceptance check**: each model shows a figure, a one-line caveat, and a JSON
+  metrics block; the global warning banner is visible above all five.
+
+### 3.6 Tab 3 — About (reference tables + limitations)
+
+- **Goal**: make the data dictionary and reference CSVs reachable, with a plain
+  statement of limitations.
+- **Steps**:
+  ```python
+  with tab3:
+      st.subheader("About this dataset")
+      st.markdown(
+          "Nine small CSVs of recorded Ebola outbreaks (161 rows total). "
+          "Every model in the Methodology tab is a demonstration of method on "
+          "tiny data — read directions and magnitudes, not point predictions."
+      )
+      st.subheader("Virus facts")
+      st.dataframe(facts, use_container_width=True)
+      st.subheader("Virus species")
+      st.dataframe(species, use_container_width=True)
+      st.subheader("Data dictionary")
+      st.dataframe(data_dict, use_container_width=True)
+  ```
+- **Gotchas**: the Definition of Done specifically requires the **data
+  dictionary** to be reachable from About — `load_data_dictionary()` exists for
+  exactly this, don't skip it.
+- **Acceptance check**: the three tables render and the data dictionary is
+  visible from the About tab.
+
+### 3.7 Headless generator — `generate_results.py`
+
+- **Goal**: refresh every figure in `results/` without launching Streamlit
+  (CI, or emailing a static snapshot).
+- **Steps**: add `ebola/generate_results.py`. Note it imports the **real**
+  function names from `charts.py`/`models.py` (so `symptom_cooccurance` — the
+  function, not the `symptom_cooccurrence` filename string):
+  ```python
+  from loaders import (load_outbreaks, load_country_yearly,
+                       load_outbreak_timeline, load_master,
+                       load_clinical, load_transmission_factors,
+                       load_monthly_trends)
+  from charts import (outbreak_gantt, cfr_vs_size, cumulative_deaths,
+                      bubble_map, symptom_cooccurance, transmission_lollipop)
+  from models import (outcome_classifier, cfr_trend, monthly_forecast,
+                      severity_regression, duration_model)
+  from utils import save_figure
+
+  outbreaks = load_outbreaks()
+  save_figure(outbreak_gantt(outbreaks), "outbreak_gantt")
+  save_figure(cfr_vs_size(outbreaks), "cfr_vs_size")
+
+  yearly = load_country_yearly()
+  timeline = load_outbreak_timeline()
+  save_figure(cumulative_deaths(yearly, timeline), "cumulative_deaths")
+
+  master = load_master()
+  save_figure(bubble_map(master, yearly), "bubble_map")
+
+  # function is spelled symptom_cooccurance; saved file is symptom_cooccurrence
+  save_figure(symptom_cooccurance(load_clinical()), "symptom_cooccurrence")
+  save_figure(transmission_lollipop(load_transmission_factors()),
+              "transmission_lollipop")
+
+  # Phase 2 models return (metrics, fig) — keep the figure half:
+  save_figure(outcome_classifier(load_clinical())[1], "outcome_classifier_coefs")
+  save_figure(cfr_trend(yearly)[1], "cfr_trend")
+  save_figure(monthly_forecast(load_monthly_trends())[1], "monthly_forecast")
+  save_figure(severity_regression(outbreaks)[1], "severity_regression")
+  save_figure(duration_model(outbreaks)[1], "duration_model")
+  ```
+  Run with `python ebola/generate_results.py` (from the repo root) or
+  `python generate_results.py` (from `ebola/`).
+- **Gotchas**:
+  - The import line is where the function-vs-filename mismatch surfaces as a hard
+    `ImportError` — import `symptom_cooccurance` (the name that actually exists in
+    `charts.py`), not the `symptom_cooccurrence` filename string.
+  - This script must reproduce the **same** filenames as the dashboard so the two
+    paths stay diff-able. Reuse the Phase 1/2 `name` strings, not ad-hoc ones.
+- **Acceptance check**: a clean run writes 11 `.html` + 11 `.png` files into
+  `results/` and exits 0; deleting `results/` and re-running regenerates all of
+  them.
+
+### 3.8 Run & verify the phase
+
+- **Steps**: `streamlit run main.py`, click through all three tabs, then confirm
+  `results/` holds one `.html` and one `.png` for every `name` in the Phase 1 and
+  Phase 2 tables (11 figures × 2 = 22 files).
+- **Acceptance check** (rolls up to the Definition of Done):
+  - app opens with no traceback;
+  - Explore has ≥4 hover-enabled charts;
+  - Methodology demo shows the classifier + ≥1 forecast, each with a caveat;
+  - the data dictionary is reachable from About;
+  - `python ebola/generate_results.py` regenerates every `results/` file and
+    exits cleanly.
 
 ## Phase 4 — Polish (1 hour)
 

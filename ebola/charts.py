@@ -192,7 +192,7 @@ def bubble_map(master: pd.DataFrame, yearly:pd.DataFrame)->go.Figure:
 INPUT: data frame loaders.load_clinical->symptom_list
 OUTPUT: heatmap
 '''
-def symptom_coocurrance(df:pd.DataFrame)->go.Figure:
+def symptom_cooccurance(df:pd.DataFrame)->go.Figure:
     # built patient x symptom binary matrix
     exploded = df.explode('symptom_list')
     binary = pd.crosstab(exploded['patient_id'],exploded['symptom_list'])
