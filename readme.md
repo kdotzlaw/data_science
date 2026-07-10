@@ -5,6 +5,9 @@
 ### [Covid-19 Visualization Dashboard](Covid-Test)
 An interactive Covid-19 data exploration project built on the 2020 Johns Hopkins dataset. Features an animated choropleth world map, bubble map visualization, mortality/recovery rates, WHO region comparison, worldometer analysis, USA county drill-down, and Holt-Winters forecasting.
 
+### [Ebola Data Explorer](ebola)
+An interactive Streamlit dashboard pairing visual exploration of historical Ebola outbreaks with small forecasting and modeling demos. Features six interactive charts (outbreak timeline, CFR vs. outbreak size, cumulative deaths, an Africa bubble map, a symptom co-occurrence heatmap, and a transmission risk lollipop) plus four method demos: a patient outcome classifier, CFR trend lines, a monthly case forecast, and an outbreak severity regression. Built with pandas, NumPy, Plotly, scikit-learn, and statsmodels. Datasets are deliberately tiny, so the models demonstrate method rather than operational prediction.
+
 ### [Protein Visualization](protein_visualization)
 A Dash web app for visualizing 3D protein structures from user uploaded .pdb files. Includes RCSB-fetch-by-ID, chain/residue selectors, sequence view, stats panel, HETATM toggle, and mmCIF support.
 
