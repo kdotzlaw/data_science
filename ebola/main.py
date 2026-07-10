@@ -1,7 +1,6 @@
 import streamlit as st
 from loaders import *
 from charts import *
-from utils import save_figure
 import plotly.graph_objects as go
 from models import *
 
@@ -23,24 +22,18 @@ facts       = load(load_virus_facts)()
 data_dict   = load(load_data_dictionary)()
 
 
-# wrap save_fig so it only runs 1x per data change (ie cache it)
+# cache each figure so the builder only runs 1x per data change
 @st.cache_data(show_spinner=False)
 def chart(name: str, _builder, *args)->go.Figure:
-    fig = _builder(*args)
-    save_figure(fig,name)
-    return fig
+    return _builder(*args)
 
 @st.cache_data(show_spinner=False)
 def model(name: str, _builder, *args)-> tuple[dict,go.Figure]:
-    metrics, fig = _builder(*args)
-    save_figure(fig,name)
-    return metrics, fig
+     return _builder(*args)
 
-'''
-EXPLORE TAB
-- charts 1 - 6 render with fig save
-- add country & risk filters to cumulative_deaths & transmission_lollipop
-'''
+# EXPLORE TAB
+# - charts 1 - 6 render (no fig save; use generate_results.py to refresh /results)
+# - add country & risk filters to cumulative_deaths & transmission_lollipop
 with tab1:
     st.plotly_chart(chart(
         'outbreak_gantt',
@@ -86,10 +79,8 @@ with tab1:
     def view(_builder, *args)->go.Figure:
         return _builder(*args)
     
-    '''
-    CUMULATIVE_DEATHS
-    - add country filters
-    '''
+    # CUMULATIVE_DEATHS
+    # - add country filters
     countries = sorted(yearly['country'].unique())
     picked = st.multiselect(
         'Countries',
@@ -108,15 +99,12 @@ with tab1:
                 timeline
             )
         else:
-            # no save
             sub = yearly[yearly['country'].isin(picked)]
             fig = view(cumulative_deaths,sub,timeline)
         st.plotly_chart(fig, use_container_width=True)
 
-    '''
-    TRANSMISSION_LOLLIPOP
-    - add risk factor filters
-    '''
+    # TRANSMISSION_LOLLIPOP
+    # - add risk factor filters
     cats = sorted(transmission['factor_category'].unique())
     picked = st.multiselect(
         'Risk categories',
@@ -134,17 +122,14 @@ with tab1:
                 transmission,
             )
         else:
-            # no save
             fig = view(
                 transmission_lollipop,
                 transmission[transmission['factor_category'].isin(picked)]
             )
         st.plotly_chart(fig, use_container_width=True)
-'''
-METHODOLOGY TAB
-- render model figs with metrics
-- render per model caveat banner
-'''
+# METHODOLOGY TAB
+# - render model figs with metrics
+# - render per model caveat banner
 with tab2:
     st.warning('Demonstration only -- n is tiny (<=10 rows per model).' \
     'These are methodology demos, not operational predictions.')
@@ -184,10 +169,7 @@ with tab2:
         caption='MAE in log10 space. This is a sanity demo,' \
         'not a benchmark.'
     )
-'''
-ABOUT TAB
-- 
-'''
+# ABOUT TAB
 with tab3:
     st.subheader('About this dataset')
     st.markdown(
